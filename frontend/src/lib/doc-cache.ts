@@ -15,10 +15,14 @@ interface DocEntry {
   name: string;
   revision: number;
   lastAccess: number;
+  /** 적용된 op들 (시간순). undo가 여기서 pop. */
   history: Op[];
+  /** 취소된 op들. redo가 여기서 pop. */
   redoStack: Op[];
   /** 페이지별 텍스트 추출 캐시. revision 변경 시 무효화. */
   textCache: Map<number, TextExtractionResult>;
+  /** 원본 PDF byte (undo 시 처음부터 op replay 위해). */
+  originalBytes: Uint8Array;
 }
 
 const cache = new Map<string, DocEntry>();
@@ -44,6 +48,7 @@ export async function registerNewDoc(
     history: [],
     redoStack: [],
     textCache: new Map(),
+    originalBytes: buf,
   };
   cache.set(docId, entry);
   evictIfNeeded();
@@ -71,6 +76,7 @@ export async function getDoc(docId: string): Promise<DocEntry | null> {
     history: [],
     redoStack: [],
     textCache: new Map(),
+    originalBytes: buf,
   };
   cache.set(docId, entry);
   evictIfNeeded();
@@ -82,10 +88,15 @@ export async function disposeDoc(docId: string): Promise<void> {
   await deleteDoc(docId);
 }
 
-export async function applyOpsToDoc(
-  docId: string,
-  ops: Op[],
-): Promise<{ revision: number; affectedPages: number[]; newPageCount: number } | null> {
+export interface OpResult {
+  revision: number;
+  affectedPages: number[];
+  newPageCount: number;
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+export async function applyOpsToDoc(docId: string, ops: Op[]): Promise<OpResult | null> {
   const entry = await getDoc(docId);
   if (!entry) return null;
   const result = applyOps(entry.doc, ops);
@@ -93,22 +104,91 @@ export async function applyOpsToDoc(
   entry.redoStack = [];
   entry.revision += 1;
   entry.lastAccess = Date.now();
-  // 영향받은 페이지 (혹은 전체) 텍스트 캐시 무효화
   if (
     ops.some(
-      (o) =>
-        o.op === 'delete-pages' ||
-        o.op === 'reorder-pages' ||
-        o.op === 'rotate-pages',
+      (o) => o.op === 'delete-pages' || o.op === 'reorder-pages' || o.op === 'rotate-pages',
     )
   ) {
     entry.textCache.clear();
   } else {
     for (const p of result.affectedPages) entry.textCache.delete(p);
   }
-  // PdfDocument의 콘텐츠 캐시도 무효화 (텍스트/추가 op으로 새 stream이 들어갔을 수 있음)
   entry.doc.invalidateContentCache();
-  return { revision: entry.revision, ...result };
+  return {
+    revision: entry.revision,
+    ...result,
+    canUndo: entry.history.length > 0,
+    canRedo: entry.redoStack.length > 0,
+  };
+}
+
+/** 가장 최근 op을 취소. */
+export async function undoDoc(docId: string): Promise<OpResult | null> {
+  const entry = await getDoc(docId);
+  if (!entry) return null;
+  if (entry.history.length === 0) {
+    return {
+      revision: entry.revision,
+      affectedPages: [],
+      newPageCount: entry.doc.pageCount(),
+      canUndo: false,
+      canRedo: entry.redoStack.length > 0,
+    };
+  }
+  const op = entry.history.pop()!;
+  entry.redoStack.push(op);
+  // 원본 byte 부터 history 전체 replay
+  entry.doc = PdfDocument.open(entry.originalBytes);
+  if (entry.history.length > 0) {
+    applyOps(entry.doc, [...entry.history]);
+  }
+  entry.revision += 1;
+  entry.textCache.clear();
+  entry.lastAccess = Date.now();
+  return {
+    revision: entry.revision,
+    affectedPages: [],
+    newPageCount: entry.doc.pageCount(),
+    canUndo: entry.history.length > 0,
+    canRedo: entry.redoStack.length > 0,
+  };
+}
+
+/** redoStack 의 op을 다시 적용. */
+export async function redoDoc(docId: string): Promise<OpResult | null> {
+  const entry = await getDoc(docId);
+  if (!entry) return null;
+  if (entry.redoStack.length === 0) {
+    return {
+      revision: entry.revision,
+      affectedPages: [],
+      newPageCount: entry.doc.pageCount(),
+      canUndo: entry.history.length > 0,
+      canRedo: false,
+    };
+  }
+  const op = entry.redoStack.pop()!;
+  applyOps(entry.doc, [op]);
+  entry.history.push(op);
+  entry.revision += 1;
+  entry.textCache.clear();
+  entry.doc.invalidateContentCache();
+  entry.lastAccess = Date.now();
+  return {
+    revision: entry.revision,
+    affectedPages: [],
+    newPageCount: entry.doc.pageCount(),
+    canUndo: entry.history.length > 0,
+    canRedo: entry.redoStack.length > 0,
+  };
+}
+
+/** GET /documents/{id} 등에 사용 — 현재 undo/redo 가능 여부. */
+export function entryUndoState(entry: DocEntry): { canUndo: boolean; canRedo: boolean } {
+  return {
+    canUndo: entry.history.length > 0,
+    canRedo: entry.redoStack.length > 0,
+  };
 }
 
 /** 페이지 텍스트 (캐시 우선) */
@@ -133,6 +213,7 @@ export async function rebaseDoc(
   docId: string,
   newDoc: PdfDocument,
   name: string,
+  bytes: Uint8Array,
 ): Promise<void> {
   const entry: DocEntry = {
     doc: newDoc,
@@ -142,6 +223,7 @@ export async function rebaseDoc(
     history: [],
     redoStack: [],
     textCache: new Map(),
+    originalBytes: bytes,
   };
   cache.set(docId, entry);
 }

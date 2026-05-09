@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { disposeDoc, getDoc } from '@/lib/doc-cache';
+import { disposeDoc, entryUndoState, getDoc } from '@/lib/doc-cache';
 
 export const runtime = 'nodejs';
 
@@ -24,6 +24,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ docId: str
     version: doc.version,
     pages,
     revision: entry.revision,
+    ...entryUndoState(entry),
   });
 }
 

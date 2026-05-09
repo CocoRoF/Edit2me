@@ -1,6 +1,6 @@
 'use client';
 
-import { Plus, Download, Loader2, Combine, FileText, Minus, ZoomIn } from 'lucide-react';
+import { Plus, Download, Loader2, FileText, Minus, ZoomIn, Undo2, Redo2 } from 'lucide-react';
 import { Kbd } from '@/components/ui/Kbd';
 
 interface Props {
@@ -15,6 +15,10 @@ interface Props {
   downloading: boolean;
   modified: boolean;
   onHome: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }
 
 export function Toolbar({
@@ -29,6 +33,10 @@ export function Toolbar({
   downloading,
   modified,
   onHome,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: Props) {
   return (
     <header
@@ -61,6 +69,25 @@ export function Toolbar({
 
       <div className="flex-1" />
 
+      <div className="flex items-stretch gap-0.5">
+        <button
+          onClick={onUndo}
+          disabled={!canUndo}
+          className="btn btn-ghost btn-icon"
+          title="실행 취소 (⌘Z)"
+        >
+          <Undo2 size={16} />
+        </button>
+        <button
+          onClick={onRedo}
+          disabled={!canRedo}
+          className="btn btn-ghost btn-icon"
+          title="다시 실행 (⌘⇧Z)"
+        >
+          <Redo2 size={16} />
+        </button>
+      </div>
+
       <button
         onClick={toggleAddText}
         className={addTextMode ? 'btn btn-primary' : 'btn'}
@@ -85,7 +112,7 @@ export function Toolbar({
         <button
           onClick={resetZoom}
           className="px-2 text-xs w-14 text-center hover:bg-[color:var(--color-surface-2)]"
-          title="100% 로 (⌘1)"
+          title="100% 로 (⌘0)"
         >
           {Math.round(zoom * 100)}%
         </button>
@@ -98,11 +125,7 @@ export function Toolbar({
         </button>
       </div>
 
-      <button
-        onClick={onDownload}
-        disabled={downloading}
-        className="btn btn-primary"
-      >
+      <button onClick={onDownload} disabled={downloading} className="btn btn-primary">
         {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
         <span>다운로드</span>
         <Kbd>⌘S</Kbd>

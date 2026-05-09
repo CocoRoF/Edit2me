@@ -26,6 +26,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ docId: str
     const result = await applyOpsToDoc(docId, body.ops);
     if (!result) return NextResponse.json({ error: { code: 'doc-not-found' } }, { status: 404 });
     return NextResponse.json({ ...result, appliedOps: body.ops.length });
+    // result already includes canUndo/canRedo
   } catch (e) {
     return NextResponse.json(
       { error: { code: 'op-failed', message: (e as Error).message } },

@@ -21,7 +21,17 @@ export interface DocumentMeta {
   version: string;
   pages: PageMeta[];
   revision: number;
+  canUndo?: boolean;
+  canRedo?: boolean;
   diagnostics?: Array<{ level: string; code: string; message: string }>;
+}
+
+export interface OpResult {
+  revision: number;
+  affectedPages: number[];
+  newPageCount: number;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 export interface TextBlock {
@@ -98,7 +108,7 @@ export async function applyOps(
   docId: string,
   baseRevision: number,
   ops: Op[],
-): Promise<{ revision: number; affectedPages: number[]; newPageCount: number }> {
+): Promise<OpResult> {
   const res = await fetch(apiUrl(`/api/documents/${docId}/ops`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -108,7 +118,19 @@ export async function applyOps(
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error?.message || `Op failed (${res.status})`);
   }
-  return await res.json();
+  return (await res.json()) as OpResult;
+}
+
+export async function undoOp(docId: string): Promise<OpResult> {
+  const res = await fetch(apiUrl(`/api/documents/${docId}/undo`), { method: 'POST' });
+  if (!res.ok) throw new Error(`Undo failed (${res.status})`);
+  return (await res.json()) as OpResult;
+}
+
+export async function redoOp(docId: string): Promise<OpResult> {
+  const res = await fetch(apiUrl(`/api/documents/${docId}/redo`), { method: 'POST' });
+  if (!res.ok) throw new Error(`Redo failed (${res.status})`);
+  return (await res.json()) as OpResult;
 }
 
 export async function finalizeDoc(

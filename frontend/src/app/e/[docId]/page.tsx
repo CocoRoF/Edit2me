@@ -7,6 +7,8 @@ import {
   finalizeDoc,
   getDocument,
   getPageTextBatch,
+  undoOp,
+  redoOp,
   type DocumentMeta,
   type PageMeta,
   type PageText,
@@ -43,6 +45,8 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
   const [reload, setReload] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [modified, setModified] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const [pageTexts, setPageTexts] = useState<Map<number, PageText>>(new Map());
   const [addTextMode, setAddTextMode] = useState(false);
   const [addTextAt, setAddTextAt] = useState<{ pageIndex: number; x: number; y: number } | null>(null);
@@ -56,6 +60,8 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
         const m = await getDocument(docId);
         if (cancelled) return;
         setMeta(m);
+        setCanUndo(!!m.canUndo);
+        setCanRedo(!!m.canRedo);
         // batch text load (전체)
         const batch = await getPageTextBatch(docId, []);
         if (cancelled) return;
@@ -126,6 +132,16 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
       } else if ((e.key === 's' || e.key === 'S') && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         handleDownload();
+      } else if ((e.key === 'z' || e.key === 'Z') && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          if (canRedo) handleRedo();
+        } else {
+          if (canUndo) handleUndo();
+        }
+      } else if ((e.key === 'y' || e.key === 'Y') && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        if (canRedo) handleRedo();
       } else if ((e.key === '0') && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setZoom(1);
@@ -144,7 +160,7 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, meta, addTextMode]);
+  }, [selected, meta, addTextMode, canUndo, canRedo]);
 
   const runOps = useCallback(
     async (ops: Op[]) => {
@@ -153,13 +169,14 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
         const res = await apiApplyOps(docId, meta.revision, ops);
         const fresh = await getDocument(docId);
         setMeta(fresh);
+        setCanUndo(res.canUndo);
+        setCanRedo(res.canRedo);
         setReload((x) => x + 1);
         setModified(true);
         if (fresh.pageCount > 0 && activeIndex >= fresh.pageCount) {
           setActive(fresh.pageCount - 1);
         }
         setSelected(new Set());
-        // 영향 받은 페이지 텍스트만 다시 로드 (페이지 구조 변경 시 전체)
         if (
           ops.some(
             (o) => o.op === 'delete-pages' || o.op === 'reorder-pages' || o.op === 'rotate-pages',
@@ -177,6 +194,41 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
     },
     [docId, meta, activeIndex, reloadAffected, reloadAllText, toast],
   );
+
+  const handleUndo = useCallback(async () => {
+    try {
+      const res = await undoOp(docId);
+      const fresh = await getDocument(docId);
+      setMeta(fresh);
+      setCanUndo(res.canUndo);
+      setCanRedo(res.canRedo);
+      setReload((x) => x + 1);
+      setModified(res.canUndo); // history가 남아 있으면 여전히 수정 상태
+      if (fresh.pageCount > 0 && activeIndex >= fresh.pageCount) {
+        setActive(fresh.pageCount - 1);
+      }
+      setSelected(new Set());
+      await reloadAllText();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }, [docId, activeIndex, reloadAllText, toast]);
+
+  const handleRedo = useCallback(async () => {
+    try {
+      const res = await redoOp(docId);
+      const fresh = await getDocument(docId);
+      setMeta(fresh);
+      setCanUndo(res.canUndo);
+      setCanRedo(res.canRedo);
+      setReload((x) => x + 1);
+      setModified(true);
+      setSelected(new Set());
+      await reloadAllText();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }, [docId, reloadAllText, toast]);
 
   const handleSelect = useCallback(
     (i: number, mode: 'single' | 'toggle' | 'range') => {
@@ -271,6 +323,10 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
         downloading={downloading}
         modified={modified}
         onHome={() => router.push('/')}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
       />
 
       {diagnostics.length > 0 && (
