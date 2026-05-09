@@ -8,6 +8,8 @@
         "start": "next start",
         "lint": "next lint",
         "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "test:watch": "vitest",
         "build:cmaps": "node ../../scripts/build-cmaps.mjs"
     },
     "dependencies": {
@@ -24,6 +26,7 @@
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
         "tailwindcss": "^4.0.0",
-        "typescript": "^5.7.0"
+        "typescript": "^5.7.0",
+        "vitest": "^4.1.5"
     }
 }
