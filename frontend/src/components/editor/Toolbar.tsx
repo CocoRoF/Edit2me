@@ -1,6 +1,9 @@
 'use client';
 
-import { Plus, Download, Loader2, FileText, Minus, ZoomIn, Undo2, Redo2 } from 'lucide-react';
+import {
+  Plus, Download, Loader2, FileText, Minus, ZoomIn, Undo2, Redo2,
+  HelpCircle, AlertTriangle,
+} from 'lucide-react';
 import { Kbd } from '@/components/ui/Kbd';
 
 interface Props {
@@ -19,6 +22,9 @@ interface Props {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  diagnosticCount: number;
+  onOpenDiagnostics: () => void;
+  onOpenHelp: () => void;
 }
 
 export function Toolbar({
@@ -37,6 +43,9 @@ export function Toolbar({
   canRedo,
   onUndo,
   onRedo,
+  diagnosticCount,
+  onOpenDiagnostics,
+  onOpenHelp,
 }: Props) {
   return (
     <header
@@ -124,6 +133,26 @@ export function Toolbar({
           <ZoomIn size={14} />
         </button>
       </div>
+
+      {diagnosticCount > 0 && (
+        <button
+          onClick={onOpenDiagnostics}
+          className="btn btn-ghost btn-icon relative"
+          title={`${diagnosticCount}개의 진단`}
+        >
+          <AlertTriangle size={16} className="text-[color:var(--color-warn)]" />
+          <span
+            className="absolute -top-0.5 -right-0.5 text-[10px] rounded-full px-1.5 py-px"
+            style={{ background: 'var(--color-warn)', color: '#0b1020' }}
+          >
+            {diagnosticCount}
+          </span>
+        </button>
+      )}
+
+      <button onClick={onOpenHelp} className="btn btn-ghost btn-icon" title="키보드 단축키 (?)">
+        <HelpCircle size={16} />
+      </button>
 
       <button onClick={onDownload} disabled={downloading} className="btn btn-primary">
         {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}

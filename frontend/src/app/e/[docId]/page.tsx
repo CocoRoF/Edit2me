@@ -18,6 +18,8 @@ import { Sidebar } from '@/components/editor/Sidebar';
 import { Toolbar } from '@/components/editor/Toolbar';
 import { PageView } from '@/components/editor/PageView';
 import { AddTextDialog } from '@/components/editor/AddTextDialog';
+import { DiagnosticPanel } from '@/components/editor/DiagnosticPanel';
+import { HelpDialog } from '@/components/editor/HelpDialog';
 import { ToastProvider, useToast } from '@/components/ui/Toast';
 import { Banner } from '@/components/ui/Banner';
 
@@ -51,6 +53,8 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
   const [addTextMode, setAddTextMode] = useState(false);
   const [addTextAt, setAddTextAt] = useState<{ pageIndex: number; x: number; y: number } | null>(null);
   const [diagnostics, setDiagnostics] = useState<string[]>([]);
+  const [diagnosticOpen, setDiagnosticOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // 초기 로드 + 모든 페이지 텍스트 batch 로드
   useEffect(() => {
@@ -155,6 +159,8 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
         if (!e.metaKey && !e.ctrlKey && meta) {
           setActive((a) => Math.max(0, a - 1));
         }
+      } else if (e.key === '?') {
+        setHelpOpen(true);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -327,23 +333,27 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
         canRedo={canRedo}
         onUndo={handleUndo}
         onRedo={handleRedo}
+        diagnosticCount={diagnostics.length}
+        onOpenDiagnostics={() => setDiagnosticOpen(true)}
+        onOpenHelp={() => setHelpOpen(true)}
       />
 
       {diagnostics.length > 0 && (
         <div className="px-4 py-2 border-b border-[color:var(--color-line)]" style={{ background: 'var(--color-surface)' }}>
           <Banner kind="warn">
-            <div>
-              <strong>일부 폰트의 텍스트는 편집/표시가 제한됩니다.</strong>{' '}
-              <span className="text-[color:var(--color-muted)]">
-                {diagnostics.length}개의 진단:{' '}
-                {diagnostics.slice(0, 2).map((d, i) => (
-                  <span key={i}>
-                    {i > 0 && ' · '}
-                    {d}
-                  </span>
-                ))}
-                {diagnostics.length > 2 && ` · 외 ${diagnostics.length - 2}건`}
-              </span>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <strong>일부 폰트의 텍스트는 편집/표시가 제한됩니다.</strong>{' '}
+                <span className="text-[color:var(--color-muted)]">
+                  {diagnostics.length}건 감지
+                </span>
+              </div>
+              <button
+                onClick={() => setDiagnosticOpen(true)}
+                className="text-xs underline shrink-0"
+              >
+                자세히
+              </button>
             </div>
           </Banner>
         </div>
@@ -394,6 +404,12 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
           onConfirm={handleAddTextConfirm}
         />
       )}
+      <DiagnosticPanel
+        open={diagnosticOpen}
+        onClose={() => setDiagnosticOpen(false)}
+        pageTexts={pageTexts}
+      />
+      <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </main>
   );
 }
