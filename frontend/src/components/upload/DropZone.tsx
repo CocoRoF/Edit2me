@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Upload, Loader2 } from 'lucide-react';
+import { useI18n } from '@/lib/i18n/context';
 
 export function DropZone({
   onFiles,
@@ -12,6 +13,7 @@ export function DropZone({
   busy: boolean;
   progress: string | null;
 }) {
+  const { t } = useI18n();
   const [hover, setHover] = useState(false);
 
   return (
@@ -35,7 +37,7 @@ export function DropZone({
       {busy ? (
         <div className="flex flex-col items-center gap-3 text-[color:var(--color-muted)]">
           <Loader2 className="animate-spin" size={36} />
-          <span className="text-sm">{progress ?? '처리 중...'}</span>
+          <span className="text-sm">{progress ?? t('common.processing')}</span>
         </div>
       ) : (
         <>
@@ -47,9 +49,9 @@ export function DropZone({
               <Upload size={24} className="text-[color:var(--color-accent)]" />
             </div>
           </div>
-          <p className="text-base mb-1">PDF를 끌어다 놓거나</p>
+          <p className="text-base mb-1">{t('dropzone.dragOrPick')}</p>
           <p className="text-xs text-[color:var(--color-muted)] mb-4">
-            여러 파일을 한 번에 올리면 병합 모드로 진입합니다
+            {t('dropzone.multipleHint')}
           </p>
           <label className="btn btn-primary inline-flex cursor-pointer">
             <input
@@ -61,10 +63,10 @@ export function DropZone({
                 if (e.target.files && e.target.files.length > 0) onFiles(e.target.files);
               }}
             />
-            파일 선택
+            {t('dropzone.pickFile')}
           </label>
           <p className="text-xs text-[color:var(--color-muted-2)] mt-5">
-            최대 200 MB · application/pdf
+            {t('dropzone.maxSize')}
           </p>
         </>
       )}

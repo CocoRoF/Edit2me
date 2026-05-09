@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { I18nProvider } from '@/lib/i18n/context';
 
 export const metadata: Metadata = {
   title: 'Edit2me — 자체 엔진 PDF 편집기',
@@ -23,7 +24,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ko">
-      <body>{children}</body>
+      <body>
+        <I18nProvider>{children}</I18nProvider>
+      </body>
     </html>
   );
 }
