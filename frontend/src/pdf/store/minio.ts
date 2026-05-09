@@ -17,9 +17,16 @@ import {
 // Edit2me는 hr_blog2.0이나 특정 호스트를 알지 않는다.
 // standalone 로컬 개발 시 기본값으로 localhost:9000을 쓰지만,
 // 운영 배포는 반드시 환경변수를 명시적으로 설정해야 한다.
+//
+// 자격증명은 우선순위로 본다:
+//   1) MINIO_ACCESS_KEY / MINIO_SECRET_KEY  (Edit2me 전용 명시)
+//   2) MINIO_ROOT_USER / MINIO_ROOT_PASSWORD  (MinIO 서버 표준 변수명)
+// 호스트가 같은 .env 파일을 minio 서비스와 공유시킬 때 (2)가 자연스럽게 떨어진다.
 const endpoint = process.env.MINIO_ENDPOINT ?? 'localhost:9000';
-const accessKeyId = process.env.MINIO_ACCESS_KEY ?? '';
-const secretAccessKey = process.env.MINIO_SECRET_KEY ?? '';
+const accessKeyId =
+  process.env.MINIO_ACCESS_KEY ?? process.env.MINIO_ROOT_USER ?? '';
+const secretAccessKey =
+  process.env.MINIO_SECRET_KEY ?? process.env.MINIO_ROOT_PASSWORD ?? '';
 const bucket = process.env.MINIO_BUCKET ?? 'edit2me';
 const secure = (process.env.MINIO_SECURE ?? 'false') === 'true';
 
