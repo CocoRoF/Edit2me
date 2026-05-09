@@ -43,3 +43,7 @@ next-env.d.ts
 # 기타
 tmp/
 .tmp/
+
+# Adobe CID→Unicode JSON (build:cmaps 결과 — 라이선스는 BSD이지만 큰 파일이라 미커밋)
+frontend/src/pdf/fonts/cid-mappings/data/
+
