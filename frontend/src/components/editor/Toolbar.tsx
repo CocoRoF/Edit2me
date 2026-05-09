@@ -5,6 +5,8 @@ import {
   HelpCircle, AlertTriangle, Menu,
 } from 'lucide-react';
 import { Kbd } from '@/components/ui/Kbd';
+import { LocaleToggle } from '@/components/ui/LocaleToggle';
+import { useI18n } from '@/lib/i18n/context';
 
 interface Props {
   docName: string;
@@ -50,6 +52,7 @@ export function Toolbar({
   onOpenHelp,
   onToggleSidebar,
 }: Props) {
+  const { t } = useI18n();
   return (
     <header
       className="h-14 flex items-center px-2 sm:px-3 gap-1.5 sm:gap-2 shrink-0 border-b"
@@ -86,7 +89,7 @@ export function Toolbar({
           color: modified ? 'var(--color-accent)' : 'var(--color-muted)',
         }}
       >
-        {modified ? '수정됨' : '저장됨'}
+        {modified ? t('editor.modified') : t('editor.saved')}
       </span>
 
       <div className="flex-1" />
@@ -113,10 +116,10 @@ export function Toolbar({
       <button
         onClick={toggleAddText}
         className={addTextMode ? 'btn btn-primary' : 'btn'}
-        title="텍스트 추가 모드 (T)"
+        title={t('editor.addText')}
       >
         <Plus size={16} />
-        <span className="hidden sm:inline">텍스트</span>
+        <span className="hidden sm:inline">{t('editor.addText')}</span>
         <span className="hidden md:inline"><Kbd>T</Kbd></span>
       </button>
 
@@ -163,13 +166,21 @@ export function Toolbar({
         </button>
       )}
 
-      <button onClick={onOpenHelp} className="hidden sm:inline-flex btn btn-ghost btn-icon" title="키보드 단축키 (?)">
+      <button
+        onClick={onOpenHelp}
+        className="hidden sm:inline-flex btn btn-ghost btn-icon"
+        title={t('editor.help')}
+      >
         <HelpCircle size={16} />
       </button>
 
+      <span className="hidden md:inline-flex">
+        <LocaleToggle />
+      </span>
+
       <button onClick={onDownload} disabled={downloading} className="btn btn-primary">
         {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-        <span className="hidden sm:inline">다운로드</span>
+        <span className="hidden sm:inline">{t('editor.download')}</span>
         <span className="hidden md:inline"><Kbd>⌘S</Kbd></span>
       </button>
     </header>

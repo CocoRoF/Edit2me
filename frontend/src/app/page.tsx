@@ -5,9 +5,12 @@ import { useCallback, useState } from 'react';
 import { uploadPdf } from '@/lib/api';
 import { Edit3, Plus, ArrowUpDown, Trash2, Combine, FileLock2 } from 'lucide-react';
 import { DropZone } from '@/components/upload/DropZone';
+import { useI18n } from '@/lib/i18n/context';
+import { LocaleToggle } from '@/components/ui/LocaleToggle';
 
 export default function LandingPage() {
   const router = useRouter();
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
@@ -46,29 +49,31 @@ export default function LandingPage() {
 
   return (
     <main className="min-h-screen flex flex-col">
-      <header className="px-6 py-4 flex items-baseline justify-between border-b border-[color:var(--color-line)]">
+      <header className="px-6 py-4 flex items-center justify-between border-b border-[color:var(--color-line)]">
         <div className="flex items-baseline gap-3">
-          <h1 className="text-lg font-semibold tracking-tight">Edit2me</h1>
-          <span className="text-xs text-[color:var(--color-muted)]">자체 엔진 PDF 편집기</span>
+          <h1 className="text-lg font-semibold tracking-tight">{t('common.brand')}</h1>
+          <span className="text-xs text-[color:var(--color-muted)]">{t('common.tagline')}</span>
         </div>
-        <a
-          href="https://github.com/CocoRoF/Edit2me"
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-ink)]"
-        >
-          GitHub →
-        </a>
+        <div className="flex items-center gap-2">
+          <LocaleToggle />
+          <a
+            href="https://github.com/CocoRoF/Edit2me"
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-[color:var(--color-muted)] hover:text-[color:var(--color-ink)]"
+          >
+            GitHub →
+          </a>
+        </div>
       </header>
 
       <div className="flex-1 flex flex-col items-center justify-center p-6">
         <section className="w-full max-w-2xl mb-10 text-center">
           <h2 className="text-3xl sm:text-4xl font-semibold tracking-tight mb-3">
-            PDF를 브라우저에서 바로 편집
+            {t('landing.hero.title')}
           </h2>
           <p className="text-sm text-[color:var(--color-muted)] max-w-lg mx-auto">
-            텍스트 편집·페이지 재배치·병합. 외부 PDF 라이브러리 없이 자체 엔진으로 동작하며,
-            업로드한 파일은 24시간 후 자동 삭제됩니다.
+            {t('landing.hero.subtitle')}
           </p>
         </section>
 
@@ -80,25 +85,29 @@ export default function LandingPage() {
         </div>
 
         <section className="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-3 w-full max-w-2xl">
-          <FeatureCard icon={<Edit3 size={16} />} label="텍스트 편집" />
-          <FeatureCard icon={<Plus size={16} />} label="텍스트 추가" />
-          <FeatureCard icon={<ArrowUpDown size={16} />} label="페이지 재배치" />
-          <FeatureCard icon={<Trash2 size={16} />} label="페이지 삭제" />
+          <FeatureCard icon={<Edit3 size={16} />} label={t('landing.feature.editText')} />
+          <FeatureCard icon={<Plus size={16} />} label={t('landing.feature.addText')} />
+          <FeatureCard icon={<ArrowUpDown size={16} />} label={t('landing.feature.reorder')} />
+          <FeatureCard icon={<Trash2 size={16} />} label={t('landing.feature.delete')} />
         </section>
 
         <section className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
-          <FeatureCard icon={<Combine size={16} />} label="여러 PDF 병합" hint="여러 파일 업로드" />
+          <FeatureCard
+            icon={<Combine size={16} />}
+            label={t('landing.feature.merge')}
+            hint={t('landing.feature.merge.hint')}
+          />
           <FeatureCard
             icon={<FileLock2 size={16} />}
-            label="암호화 PDF 거부"
-            hint="안전 정책"
+            label={t('landing.feature.encrypted')}
+            hint={t('landing.feature.encrypted.hint')}
             muted
           />
         </section>
       </div>
 
       <footer className="px-6 py-5 text-center text-xs text-[color:var(--color-muted-2)] border-t border-[color:var(--color-line)]">
-        <p>외부 PDF 라이브러리를 사용하지 않는 자체 엔진. PDF 명세 ISO 32000-1을 직접 구현.</p>
+        <p>{t('landing.footer')}</p>
       </footer>
     </main>
   );
