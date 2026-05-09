@@ -22,25 +22,30 @@
 ## 아키텍처 한 눈에 보기
 
 ```
-┌────────────────────────── Edit2me (별도 repo) ─────────────────────────┐
-│                                                                       │
-│  Next.js 15 (App Router, basePath=/edit2me)                           │
-│  ├─ app/             ─ UI (React 19 + Tailwind 4)                     │
-│  ├─ app/api/         ─ 서버 사이드 PDF 파싱/직렬화                    │
-│  └─ src/pdf/         ─ 자체 PDF 엔진 (parser, writer, renderer, ops)  │
-│                                                                       │
-└──────────────────────────────────┬────────────────────────────────────┘
-                                   │ 동일 docker network
-       ┌───────────────────────────┴───────────────────────────┐
+┌────────────────────────── Edit2me (별도 repo: github.com/CocoRoF/Edit2me) ──┐
+│                                                                            │
+│  Next.js 15 (App Router, basePath=/edit2me)                                │
+│  ├─ app/             ─ UI (React 19 + Tailwind 4)                          │
+│  ├─ app/api/         ─ 서버 사이드 PDF 파싱/직렬화                          │
+│  └─ src/pdf/         ─ 자체 PDF 엔진 (parser, writer, renderer, ops)        │
+│                                                                            │
+└──────────────────────────────────┬─────────────────────────────────────────┘
+                                   │ 호스트 빌드 시 git clone
+                                   ▼
+       ┌───────────────────────────────────────────────────────┐
        │              hr_blog2.0 (별도 repo, 호스트)            │
+       │  edit2me/                                             │
+       │  ├─ Dockerfile         ← git clone Edit2me 후 빌드     │
+       │  └─ Dockerfile.dev     ← 동일                          │
        │                                                       │
+       │  docker-compose: edit2me-frontend service             │
        │  nginx ─ /edit2me/* → edit2me-frontend:3000           │
        │       └ /uploads/*  → minio:9000                      │
        │  minio ─ 버킷 `pdf-edit` (Edit2me 전용)               │
        └───────────────────────────────────────────────────────┘
 ```
 
-소스는 분리, 배포만 hr_blog2.0의 docker-compose에 service로 추가. 자세한 통합 방식은 [`docs/09-integration-hr-blog.md`](./docs/09-integration-hr-blog.md).
+소스는 분리. 호스트(hr_blog2.0)는 자체 Dockerfile로 빌드 시점에 Edit2me를 git clone해서 가져온다 — 호스트 파일시스템에 Edit2me가 같이 있을 필요 없음. 자세한 통합 방식은 [`docs/09-integration-hr-blog.md`](./docs/09-integration-hr-blog.md).
 
 ## 문서 구성
 

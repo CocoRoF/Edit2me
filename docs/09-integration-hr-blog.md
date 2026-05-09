@@ -6,8 +6,8 @@
 
 | 항목 | 결정 |
 |---|---|
-| 코드베이스 | 별도 git repo. hr_blog2.0과 sub-module/sub-tree 관계 안 가짐. |
-| 디렉토리 배치 (개발) | `~/.../prj-doc/Edit2me` 와 `~/.../prj-doc/hr_blog2.0` 형제 관계. |
+| 코드베이스 | 별도 git repo (`github.com/CocoRoF/Edit2me`). hr_blog2.0과 sub-module/sub-tree 관계 없음. |
+| 빌드 방식 | hr_blog2.0이 자체 `edit2me/Dockerfile` 을 가지고 빌드 시 **`git clone`** 으로 Edit2me를 가져옴. **호스트 파일시스템에 Edit2me 체크아웃 불필요.** |
 | 배포 단위 | 별도 docker 이미지(`edit2me-frontend`). hr_blog2.0의 compose에 service 1개 추가. |
 | URL 경로 | `https://hrletsgo.me/edit2me/...` (Next.js basePath = `/edit2me`). |
 | MinIO | hr_blog2.0 인스턴스 공유. 별도 버킷 `pdf-edit`. |
@@ -57,25 +57,63 @@ upstream edit2me { server edit2me-frontend:3000; }
 
 ## 2. docker-compose 통합
 
+### 호스트 측 Dockerfile
+
+hr_blog2.0 repo 안에 `edit2me/` 디렉토리를 만들고 두 개의 Dockerfile을 둔다. 이들은 빌드 시 `git clone` 으로 Edit2me를 가져온다 — 호스트 파일시스템에 Edit2me 체크아웃이 있어야 할 필요 *없다*.
+
+`hr_blog2.0/edit2me/Dockerfile` (운영):
+```dockerfile
+FROM node:22-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG EDIT2ME_REPO=https://github.com/CocoRoF/Edit2me.git
+ARG EDIT2ME_REF=main
+
+WORKDIR /app
+
+RUN git clone --depth 1 --branch "${EDIT2ME_REF}" "${EDIT2ME_REPO}" /tmp/edit2me \
+ && cp -r /tmp/edit2me/frontend/src/. /app/ \
+ && rm -rf /tmp/edit2me
+
+RUN npm install --no-audit --no-fund
+RUN npm run build
+
+EXPOSE 3000
+CMD ["npm", "run", "start"]
+```
+
+`hr_blog2.0/edit2me/Dockerfile.dev` 는 위와 동일하되 `npm run build` 생략, `CMD ["npm", "run", "dev"]`.
+
+### 새 commit 반영 / 버전 박기
+
+`--depth 1 --branch main` 은 docker layer 캐시에 잡히므로, Edit2me에 새 commit이 올라오면 강제 재빌드해야 한다:
+
+```bash
+docker compose -f docker-compose.prod.yml build --no-cache edit2me-frontend
+```
+
+또는 `EDIT2ME_REF` 를 commit SHA / tag로 박는 게 결정론적이다:
+
+```bash
+EDIT2ME_REF=v0.3.0 docker compose -f docker-compose.prod.yml build edit2me-frontend
+```
+
 ### 개발 (`docker-compose.dev.yml`)
 
-기존 파일 끝(`volumes:` 직전)에 service 추가:
-
 ```yaml
-  # ============================================
-  # Edit2me Frontend (dev)
-  # 별도 repo. ../Edit2me/frontend 를 build context로 사용.
-  # 코드 변경 시 HMR 동작.
-  # ============================================
   edit2me-frontend:
     container_name: new-web-edit2me-dev
     build:
-      context: ../Edit2me/frontend
+      context: ./edit2me                       # ← 호스트 측 Dockerfile.dev 가 git clone
       dockerfile: Dockerfile.dev
-    # Edit2me는 자체 .env 파일을 가지지 않는다 — 호스트(이 compose)가 모든 값 주입.
+      args:
+        EDIT2ME_REF: ${EDIT2ME_REF:-main}
+    # Edit2me는 자체 .env 파일을 가지지 않는다 — 호스트가 모든 값 주입.
     environment:
       - NODE_ENV=development
-      - WATCHPACK_POLLING=true
       - NEXT_PUBLIC_BASE_PATH=/edit2me
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
@@ -84,19 +122,17 @@ upstream edit2me { server edit2me-frontend:3000; }
       - MINIO_SECURE=false
       - EDIT2ME_MAX_UPLOAD_MB=200
       - EDIT2ME_DOC_TTL_HOURS=24
-    volumes:
-      - ../Edit2me/frontend/src:/app
-      - /app/node_modules
-      - /app/.next
     expose:
       - "3000"
     ports:
-      - "53001:3000"      # 직접 접근(개발 디버그용)
+      - "53001:3000"
     depends_on:
       minio:
         condition: service_healthy
     restart: unless-stopped
 ```
+
+> **Edit2me 자체 개발 워크플로우**는 별도다. Edit2me repo를 clone 후 `cd Edit2me/frontend/src && npm run dev` 로 standalone 실행하고, MinIO만 hr_blog2.0의 인스턴스를 가리키면 된다.
 
 ### 운영 (`docker-compose.prod.yml`)
 
@@ -104,9 +140,10 @@ upstream edit2me { server edit2me-frontend:3000; }
   edit2me-frontend:
     container_name: new-web-edit2me
     build:
-      context: ../Edit2me/frontend
+      context: ./edit2me
       dockerfile: Dockerfile
-    # Edit2me는 자체 .env 파일을 가지지 않는다 — 호스트가 모든 값 주입.
+      args:
+        EDIT2ME_REF: ${EDIT2ME_REF:-main}
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_BASE_PATH=/edit2me
