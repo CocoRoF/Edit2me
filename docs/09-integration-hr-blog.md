@@ -21,10 +21,12 @@
 
 `hr_blog2.0/nginx/default.conf` 와 `default.dev.conf` 에 location 블록 추가:
 
+> **⚠ trailing slash 주의**: location 패턴은 **`/edit2me`**(slash 없음)으로 잡아야 한다. `/edit2me/`(slash 포함)으로 잡으면 사용자가 `/edit2me/` 로 진입했을 때 Next.js가 `trailingSlash: false` (기본)이므로 `/edit2me`로 308 redirect → nginx의 `/edit2me/` location은 그 path를 매치 못 해 host frontend로 흘러가고, host frontend의 trailingSlash 설정이 다르면 무한 redirect 루프에 빠진다. **`location /edit2me`** 는 prefix matching으로 `/edit2me`, `/edit2me/`, `/edit2me/...` 모두 잡으므로 안전.
+
 ```nginx
-# /edit2me/* → edit2me-frontend
+# /edit2me* → edit2me-frontend (trailing slash 없는 prefix!)
 # basePath=/edit2me 로 빌드된 Next.js 가 모든 라우트를 자체 처리
-location /edit2me/ {
+location /edit2me {
     set $edit2me_up http://edit2me-frontend:3000;
     proxy_pass $edit2me_up;
     proxy_http_version 1.1;
