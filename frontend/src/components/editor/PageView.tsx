@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import type { PageMeta, PageText, TextBlock } from '@/lib/api';
-import { PageSkeleton } from '@/components/ui/Skeleton';
+import { useIntersection } from '@/hooks/useIntersection';
 
 interface Props {
   page: PageMeta;
-  pageText: PageText | null; // null = 아직 로딩 중
+  pageText: PageText | null;
   zoom: number;
   onEditText?: (blockId: string, newText: string) => void;
   onCanvasClick?: (pageIndex: number, x: number, y: number) => void;
@@ -32,7 +32,6 @@ const FONT_MAP: Record<string, string> = {
 function fontFamilyFor(baseName: string, isComposite: boolean): string {
   if (FONT_MAP[baseName]) return FONT_MAP[baseName]!;
   if (isComposite) {
-    // CJK 폰트 — OS 한국어/일본어 폰트로 fallback
     return '"Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "Hiragino Sans", "Yu Gothic", sans-serif';
   }
   return 'system-ui, sans-serif';
@@ -48,18 +47,18 @@ export function PageView({
   active,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [ref, inView] = useIntersection<HTMLDivElement>('800px');
 
   const w = page.width * zoom;
   const h = page.height * zoom;
   const rotate = page.rotate ?? 0;
 
-  // 로딩 중: skeleton
-  if (!pageText) {
-    return <PageSkeleton width={w} height={h} />;
-  }
+  // 가상화: paper 외곽은 항상 렌더 (스크롤/레이아웃 안정), 내용물은 inView일 때만.
+  const renderText = inView && pageText !== null;
 
   return (
     <div
+      ref={ref}
       className="paper relative"
       style={{
         width: w,
@@ -77,23 +76,53 @@ export function PageView({
         onCanvasClick(page.index, x, y);
       }}
     >
-      {pageText.blocks.map((b) => (
-        <TextBlockView
-          key={b.blockId}
-          block={b}
-          pageHeight={page.height}
-          zoom={zoom}
-          isEditing={editingId === b.blockId && !!active}
-          canEdit={!!onEditText && b.editable && !!active}
-          onBeginEdit={() => setEditingId(b.blockId)}
-          onCommit={(newText) => {
-            setEditingId(null);
-            if (newText !== b.text && onEditText) onEditText(b.blockId, newText);
-          }}
-          onCancel={() => setEditingId(null)}
+      {!pageText && (
+        // 데이터 자체가 없는 경우 (서버 응답 대기) — shimmer
+        <SkeletonContent width={w} height={h} />
+      )}
+      {renderText &&
+        pageText.blocks.map((b) => (
+          <TextBlockView
+            key={b.blockId}
+            block={b}
+            pageHeight={page.height}
+            zoom={zoom}
+            isEditing={editingId === b.blockId && !!active}
+            canEdit={!!onEditText && b.editable && !!active}
+            onBeginEdit={() => setEditingId(b.blockId)}
+            onCommit={(newText) => {
+              setEditingId(null);
+              if (newText !== b.text && onEditText) onEditText(b.blockId, newText);
+            }}
+            onCancel={() => setEditingId(null)}
+          />
+        ))}
+    </div>
+  );
+}
+
+function SkeletonContent({ width, height }: { width: number; height: number }) {
+  const lines: Array<{ x: number; y: number; w: number; h: number }> = [];
+  let y = 60;
+  while (y < height - 80) {
+    const blockLines = 3 + Math.floor((y * 31) % 5);
+    for (let i = 0; i < blockLines; i += 1) {
+      const widthRatio = 0.5 + (((y + i) * 13) % 40) / 100;
+      lines.push({ x: 60, y, w: (width - 120) * widthRatio, h: 12 });
+      y += 22;
+    }
+    y += 28;
+  }
+  return (
+    <>
+      {lines.map((l, i) => (
+        <div
+          key={i}
+          className="skeleton absolute"
+          style={{ left: l.x, top: l.y, width: l.w, height: l.h }}
         />
       ))}
-    </div>
+    </>
   );
 }
 
