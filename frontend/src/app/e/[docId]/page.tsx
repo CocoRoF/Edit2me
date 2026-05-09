@@ -1,27 +1,41 @@
 'use client';
 
-import { useEffect, useState, useCallback, use } from 'react';
+import { useEffect, useState, useCallback, use, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   applyOps as apiApplyOps,
   finalizeDoc,
   getDocument,
+  getPageTextBatch,
   type DocumentMeta,
   type PageMeta,
+  type PageText,
 } from '@/lib/api';
 import type { Op } from '@/pdf/ops/types';
 import { Sidebar } from '@/components/editor/Sidebar';
 import { Toolbar } from '@/components/editor/Toolbar';
 import { PageView } from '@/components/editor/PageView';
 import { AddTextDialog } from '@/components/editor/AddTextDialog';
+import { ToastProvider, useToast } from '@/components/ui/Toast';
+import { Banner } from '@/components/ui/Banner';
 
-export default function EditorPage({
+export default function EditorPageWrapper({
   params,
 }: {
   params: Promise<{ docId: string }>;
 }) {
+  return (
+    <ToastProvider>
+      <EditorPage params={params} />
+    </ToastProvider>
+  );
+}
+
+function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
   const { docId } = use(params);
   const router = useRouter();
+  const toast = useToast();
+
   const [meta, setMeta] = useState<DocumentMeta | null>(null);
   const [activeIndex, setActive] = useState(0);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -29,34 +43,81 @@ export default function EditorPage({
   const [reload, setReload] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [modified, setModified] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+  const [pageTexts, setPageTexts] = useState<Map<number, PageText>>(new Map());
   const [addTextMode, setAddTextMode] = useState(false);
   const [addTextAt, setAddTextAt] = useState<{ pageIndex: number; x: number; y: number } | null>(null);
+  const [diagnostics, setDiagnostics] = useState<string[]>([]);
 
-  // 초기 로드
+  // 초기 로드 + 모든 페이지 텍스트 batch 로드
   useEffect(() => {
     let cancelled = false;
-    getDocument(docId)
-      .then((m) => {
-        if (!cancelled) setMeta(m);
-      })
-      .catch((e) => {
-        if (!cancelled) setError((e as Error).message);
-      });
+    (async () => {
+      try {
+        const m = await getDocument(docId);
+        if (cancelled) return;
+        setMeta(m);
+        // batch text load (전체)
+        const batch = await getPageTextBatch(docId, []);
+        if (cancelled) return;
+        const map = new Map<number, PageText>();
+        const diag = new Set<string>();
+        for (const p of batch.pages) {
+          map.set(p.pageIndex, p);
+          for (const fw of p.fontWarnings) {
+            for (const w of fw.warnings) diag.add(`${fw.font}: ${w}`);
+          }
+        }
+        setPageTexts(map);
+        setDiagnostics([...diag]);
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docId]);
+
+  // op 후 영향받은 페이지의 텍스트 다시 로드
+  const reloadAffected = useCallback(
+    async (indices: number[]) => {
+      if (indices.length === 0) return;
+      try {
+        const batch = await getPageTextBatch(docId, indices);
+        setPageTexts((cur) => {
+          const next = new Map(cur);
+          for (const p of batch.pages) next.set(p.pageIndex, p);
+          return next;
+        });
+      } catch (e) {
+        toast.error('페이지 텍스트 갱신 실패');
+      }
+    },
+    [docId, toast],
+  );
+
+  const reloadAllText = useCallback(async () => {
+    try {
+      const batch = await getPageTextBatch(docId, []);
+      const map = new Map<number, PageText>();
+      for (const p of batch.pages) map.set(p.pageIndex, p);
+      setPageTexts(map);
+    } catch {
+      // ignore
+    }
   }, [docId]);
 
   // 키보드 단축키
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.isContentEditable) return;
-      if ((e.target as HTMLInputElement | HTMLTextAreaElement)?.tagName === 'INPUT' ||
-          (e.target as HTMLInputElement | HTMLTextAreaElement)?.tagName === 'TEXTAREA') return;
+      const target = e.target as HTMLElement;
+      if (target?.isContentEditable) return;
+      const tag = (target as HTMLInputElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
       if (e.key === 't' || e.key === 'T') {
-        setAddTextMode((m) => !m);
+        if (!e.metaKey && !e.ctrlKey) setAddTextMode((m) => !m);
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selected.size > 0) {
           e.preventDefault();
@@ -65,12 +126,25 @@ export default function EditorPage({
       } else if ((e.key === 's' || e.key === 'S') && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         handleDownload();
+      } else if ((e.key === '0') && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setZoom(1);
+      } else if (e.key === 'Escape') {
+        if (addTextMode) setAddTextMode(false);
+      } else if (e.key === 'j' || e.key === 'ArrowDown') {
+        if (!e.metaKey && !e.ctrlKey && meta) {
+          setActive((a) => Math.min(meta.pageCount - 1, a + 1));
+        }
+      } else if (e.key === 'k' || e.key === 'ArrowUp') {
+        if (!e.metaKey && !e.ctrlKey && meta) {
+          setActive((a) => Math.max(0, a - 1));
+        }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, meta, modified]);
+  }, [selected, meta, addTextMode]);
 
   const runOps = useCallback(
     async (ops: Op[]) => {
@@ -81,19 +155,27 @@ export default function EditorPage({
         setMeta(fresh);
         setReload((x) => x + 1);
         setModified(true);
-        // 활성 페이지 보정
         if (fresh.pageCount > 0 && activeIndex >= fresh.pageCount) {
           setActive(fresh.pageCount - 1);
         }
-        // 선택은 비움
         setSelected(new Set());
+        // 영향 받은 페이지 텍스트만 다시 로드 (페이지 구조 변경 시 전체)
+        if (
+          ops.some(
+            (o) => o.op === 'delete-pages' || o.op === 'reorder-pages' || o.op === 'rotate-pages',
+          )
+        ) {
+          await reloadAllText();
+        } else {
+          await reloadAffected(res.affectedPages);
+        }
         return res;
       } catch (e) {
-        setError((e as Error).message);
+        toast.error((e as Error).message);
         return null;
       }
     },
-    [docId, meta, activeIndex],
+    [docId, meta, activeIndex, reloadAffected, reloadAllText, toast],
   );
 
   const handleSelect = useCallback(
@@ -129,7 +211,9 @@ export default function EditorPage({
     if (!addTextMode) return;
     setAddTextAt({ pageIndex, x, y });
   };
-  const handleAddTextConfirm = async (params: Parameters<NonNullable<Parameters<typeof AddTextDialog>[0]['onConfirm']>>[0]) => {
+  const handleAddTextConfirm = async (
+    params: Parameters<NonNullable<Parameters<typeof AddTextDialog>[0]['onConfirm']>>[0],
+  ) => {
     setAddTextAt(null);
     setAddTextMode(false);
     await runOps([
@@ -148,10 +232,8 @@ export default function EditorPage({
 
   const handleDownload = async () => {
     setDownloading(true);
-    setError(null);
     try {
       const r = await finalizeDoc(docId, 'incremental');
-      // 다운로드 트리거
       const a = document.createElement('a');
       a.href = r.url;
       a.download = r.fileName;
@@ -159,25 +241,14 @@ export default function EditorPage({
       a.click();
       a.remove();
       setModified(false);
+      toast.success(`다운로드 시작: ${r.fileName}`);
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setDownloading(false);
     }
   };
 
-  if (error && !meta) {
-    return (
-      <main className="min-h-screen flex items-center justify-center p-6">
-        <div className="text-center">
-          <p className="text-[color:var(--color-danger)] mb-4">{error}</p>
-          <button onClick={() => router.push('/')} className="text-sm underline">
-            처음으로
-          </button>
-        </div>
-      </main>
-    );
-  }
   if (!meta) {
     return (
       <main className="min-h-screen flex items-center justify-center text-sm text-[color:var(--color-muted)]">
@@ -186,8 +257,6 @@ export default function EditorPage({
     );
   }
 
-  const activePage: PageMeta | undefined = meta.pages[activeIndex];
-
   return (
     <main className="h-screen flex flex-col">
       <Toolbar
@@ -195,17 +264,35 @@ export default function EditorPage({
         pageCount={meta.pageCount}
         zoom={zoom}
         setZoom={setZoom}
+        resetZoom={() => setZoom(1)}
         addTextMode={addTextMode}
         toggleAddText={() => setAddTextMode((m) => !m)}
         onDownload={handleDownload}
         downloading={downloading}
         modified={modified}
+        onHome={() => router.push('/')}
       />
-      {error && (
-        <div className="bg-red-50 text-red-700 text-xs px-3 py-1.5 border-b border-red-200">
-          {error}
+
+      {diagnostics.length > 0 && (
+        <div className="px-4 py-2 border-b border-[color:var(--color-line)]" style={{ background: 'var(--color-surface)' }}>
+          <Banner kind="warn">
+            <div>
+              <strong>일부 폰트의 텍스트는 편집/표시가 제한됩니다.</strong>{' '}
+              <span className="text-[color:var(--color-muted)]">
+                {diagnostics.length}개의 진단:{' '}
+                {diagnostics.slice(0, 2).map((d, i) => (
+                  <span key={i}>
+                    {i > 0 && ' · '}
+                    {d}
+                  </span>
+                ))}
+                {diagnostics.length > 2 && ` · 외 ${diagnostics.length - 2}건`}
+              </span>
+            </div>
+          </Banner>
         </div>
       )}
+
       <div className="flex-1 flex overflow-hidden">
         <Sidebar
           docId={docId}
@@ -219,33 +306,29 @@ export default function EditorPage({
           onRotate={handleRotate}
           reload={reload}
         />
-        <div className="flex-1 overflow-auto bg-gray-100 dark:bg-neutral-900 flex flex-col items-center px-6">
-          {meta.pages.map((p) =>
-            p.index === activeIndex || isNear(p.index, activeIndex) ? (
+        <div
+          className="flex-1 overflow-auto thin-scroll flex flex-col items-center px-8 py-8 gap-6"
+          style={{ background: 'var(--color-canvas)' }}
+        >
+          {meta.pages.length === 0 ? (
+            <div className="text-sm text-[color:var(--color-muted)]">페이지가 없습니다</div>
+          ) : (
+            meta.pages.map((p) => (
               <PageView
                 key={`${p.index}-${reload}`}
-                docId={docId}
                 page={p}
+                pageText={pageTexts.get(p.index) ?? null}
                 zoom={zoom}
                 onEditText={p.index === activeIndex ? handleEditText : undefined}
                 onCanvasClick={addTextMode ? handleCanvasClick : undefined}
                 addTextMode={addTextMode && p.index === activeIndex}
-                reload={reload}
+                active={p.index === activeIndex}
               />
-            ) : (
-              <div
-                key={`${p.index}-${reload}`}
-                className="paper my-4"
-                style={{
-                  width: p.width * zoom,
-                  height: p.height * zoom,
-                }}
-                onClick={() => setActive(p.index)}
-              />
-            ),
+            ))
           )}
         </div>
       </div>
+
       {addTextAt && (
         <AddTextDialog
           pageIndex={addTextAt.pageIndex}
@@ -257,8 +340,4 @@ export default function EditorPage({
       )}
     </main>
   );
-}
-
-function isNear(a: number, b: number): boolean {
-  return Math.abs(a - b) <= 1;
 }

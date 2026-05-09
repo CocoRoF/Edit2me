@@ -1,6 +1,4 @@
 // 페이지 리소스의 폰트를 *추출용 가벼운 인터페이스*로 정규화.
-//
-// width 추출, byte → unicode 디코드, ToUnicode CMap parse를 담는다.
 
 import {
   PdfDict,
@@ -21,36 +19,48 @@ import { CORE_14, isCore14, CoreFontMetrics } from './core14';
 import { parseToUnicodeCMap } from './cmap';
 
 export interface FontInfo {
-  resourceName: string; // 페이지 자원 dict의 키 (예: 'F1')
+  resourceName: string;
   baseName: string;
   isCore14: boolean;
-  isCJK: boolean;
-  // byte 시퀀스를 char code들로 분해하는 함수.
-  // 단순 8bit 폰트면 byte 1개 = code 1개. composite은 2바이트.
-  // returns: { codes: number[], byteLengths: number[] } (바이트 단위 길이도 같이)
+  isComposite: boolean; // Type0 (CID-keyed) 폰트
+  /** byte 시퀀스를 char code 시퀀스로 분해. composite은 보통 2-byte 고정. */
   decodeBytes: (bytes: Uint8Array) => { codes: number[]; lengths: number[] };
-  // code → unicode (ToUnicode 우선, 없으면 추정)
-  toUnicode: (code: number) => string | undefined;
-  // code → advance width (1/1000 em, 폰트 크기에 곱하면 pt)
+  /** code → unicode (또는 매핑 부재 시 null). ASCII fallback 안 함 — 호출자 책임. */
+  toUnicode: (code: number) => string | null;
+  /** code → advance width (1/1000 em) */
   widthOf: (code: number) => number;
   ascent: number;
   descent: number;
-  // raw font dict (for downstream)
   dict: PdfDict;
+  /** 디코드 실패 진단 */
+  warnings: string[];
+  /** 이 폰트로 표시된 텍스트가 *완전히* 추출 가능한가 (편집 가능성 판단에 사용) */
+  hasUnicodeMap: boolean;
 }
 
-const SIMPLE_LATIN_BACKUP: Record<number, string> = (() => {
-  const m: Record<number, string> = {};
-  // ASCII identity
-  for (let i = 0x20; i <= 0x7e; i += 1) m[i] = String.fromCharCode(i);
+const SIMPLE_LATIN_BACKUP: Map<number, string> = (() => {
+  const m = new Map<number, string>();
+  for (let i = 0x20; i <= 0x7e; i += 1) m.set(i, String.fromCharCode(i));
   return m;
 })();
+
+// WinAnsiEncoding 의 비ASCII 영역 일부 (Latin1 호환).
+// PDF 1.7 Appendix D 참고. 단순화를 위해 0xa0 이상은 Latin1 그대로.
+function winAnsiUnicode(code: number): string | undefined {
+  if (code >= 0x20 && code <= 0x7e) return String.fromCharCode(code);
+  if (code >= 0xa0 && code <= 0xff) return String.fromCharCode(code);
+  // 0x80-0x9f는 공식 매핑이 다양 — 건너뛴다.
+  return undefined;
+}
+
+// MacRomanEncoding 등은 v0.2에서. 현재는 식별만.
 
 export function buildFontInfo(
   doc: PdfDocument,
   resourceName: string,
   fontDict: PdfDict,
 ): FontInfo {
+  const warnings: string[] = [];
   const subtype = dictGet(fontDict, 'Subtype');
   const baseFont = dictGet(fontDict, 'BaseFont');
   const baseName =
@@ -66,14 +76,25 @@ export function buildFontInfo(
     const stream = doc.resolve(tuObj);
     if (isStream(stream)) {
       try {
-        toUni = parseToUnicodeCMap(decodeStream(stream));
-      } catch {
+        const cmap = parseToUnicodeCMap(decodeStream(stream));
+        toUni = cmap.toUnicode;
+        if (cmap.usesParent) {
+          warnings.push(
+            `ToUnicode CMap inherits from "${cmap.usesParent}" — parent CMap not bundled (some glyphs may be missing)`,
+          );
+        }
+        if (toUni.size === 0) {
+          warnings.push('ToUnicode CMap parsed empty — text extraction will fall back');
+          toUni = undefined;
+        }
+      } catch (e) {
+        warnings.push(`ToUnicode CMap parse failed: ${(e as Error).message}`);
         toUni = undefined;
       }
     }
   }
 
-  // Widths
+  // Widths (단순 폰트 + 코어 14)
   const widthMap = new Map<number, number>();
   let defaultWidth = 500;
   const widthsObj = dictGet(fontDict, 'Widths');
@@ -88,7 +109,8 @@ export function buildFontInfo(
       }
     }
   }
-  // Type0 폰트의 widths는 W array (CID 기반). 단순 처리:
+
+  // Composite 폰트의 W array
   if (isComposite) {
     const descendants = dictGet(fontDict, 'DescendantFonts');
     if (descendants && isArray(descendants)) {
@@ -97,9 +119,7 @@ export function buildFontInfo(
         const cidFont = doc.resolve(dRef);
         if (isDict(cidFont)) {
           const w = dictGet(cidFont, 'W');
-          if (w && isArray(w)) {
-            parseCIDWidths(w, doc, widthMap);
-          }
+          if (w && isArray(w)) parseCIDWidths(w, doc, widthMap);
           const dw = asNumber(dictGet(cidFont, 'DW'));
           if (dw !== undefined) defaultWidth = dw;
         }
@@ -107,7 +127,7 @@ export function buildFontInfo(
     }
   }
 
-  // 코어14는 메트릭으로 보강
+  // 코어 14는 메트릭으로 보강
   let coreMetrics: CoreFontMetrics | undefined;
   if (isCore) {
     coreMetrics = CORE_14[baseName];
@@ -119,45 +139,53 @@ export function buildFontInfo(
     }
   }
 
+  // ---- decodeBytes: byte 시퀀스 → code 시퀀스 ----
+
   const decodeBytes = isComposite
-    ? (bytes: Uint8Array) => {
-        const codes: number[] = [];
-        const lengths: number[] = [];
-        // 가장 흔한 케이스: 2바이트 고정 (Identity-H, UniKS-UCS2-H 등)
-        for (let i = 0; i + 1 < bytes.length; i += 2) {
-          codes.push((bytes[i]! << 8) | bytes[i + 1]!);
-          lengths.push(2);
-        }
-        return { codes, lengths };
-      }
-    : (bytes: Uint8Array) => {
-        const codes: number[] = [];
-        const lengths: number[] = [];
-        for (const b of bytes) {
-          codes.push(b);
-          lengths.push(1);
-        }
-        return { codes, lengths };
-      };
+    ? makeCompositeDecoder(doc, fontDict, warnings)
+    : makeSimpleDecoder();
+
+  // ---- toUnicode: ASCII fallback은 *단순 폰트*에만 적용 ----
+
+  const encoding = parseEncodingHint(fontDict);
+
+  function toUnicodeFn(code: number): string | null {
+    if (toUni) {
+      const u = toUni.get(code);
+      if (u !== undefined) return u;
+    }
+    if (isComposite) {
+      // CID. 매핑 없음. ASCII로 *절대* fallback하지 않음 (A1 버그 회피).
+      return null;
+    }
+    // 단순 폰트: 코어14 또는 표준 인코딩 fallback
+    if (isCore) {
+      const u = SIMPLE_LATIN_BACKUP.get(code);
+      if (u) return u;
+    }
+    if (encoding === 'WinAnsiEncoding' || encoding === 'StandardEncoding' || encoding === 'MacRomanEncoding') {
+      const u = winAnsiUnicode(code);
+      if (u) return u;
+    }
+    // 단순 폰트 + 알려지지 않은 인코딩이면, ASCII 영역만 통과 (관용)
+    if (code >= 0x20 && code <= 0x7e) return String.fromCharCode(code);
+    return null;
+  }
+
+  if (isComposite && !toUni) {
+    warnings.push(
+      'Composite font without ToUnicode CMap — text on this font cannot be decoded',
+    );
+  }
 
   return {
     resourceName,
     baseName,
     isCore14: isCore,
-    isCJK: isComposite,
+    isComposite,
     decodeBytes,
-    toUnicode(code) {
-      if (toUni) {
-        const u = toUni.get(code);
-        if (u !== undefined) return u;
-      }
-      // 코어14의 경우 ASCII identity
-      if (isCore && code in SIMPLE_LATIN_BACKUP) return SIMPLE_LATIN_BACKUP[code];
-      // 그 외는 ASCII는 통과
-      if (code >= 0x20 && code <= 0x7e) return String.fromCharCode(code);
-      return undefined;
-    },
-    widthOf(code) {
+    toUnicode: toUnicodeFn,
+    widthOf(code: number) {
       const w = widthMap.get(code);
       if (w !== undefined) return w;
       return defaultWidth;
@@ -165,20 +193,110 @@ export function buildFontInfo(
     ascent: coreMetrics?.ascent ?? 700,
     descent: coreMetrics?.descent ?? -200,
     dict: fontDict,
+    warnings,
+    hasUnicodeMap: toUni !== undefined || (!isComposite && (isCore || encoding !== undefined)),
   };
 }
 
+// ---- helpers ----
+
 function stripSubsetPrefix(name: string): string {
-  // PDF 임베디드 서브셋 폰트 이름은 'XXXXXX+Name' 형태.
-  if (name.length >= 7 && name[6] === '+') {
-    return name.slice(7);
-  }
+  if (name.length >= 7 && name[6] === '+') return name.slice(7);
   return name;
 }
 
-// CIDFont의 /W array 파싱.
-// 형식 1: [c [w1 w2 w3]] — c부터 시작, 각 width
-// 형식 2: [c1 c2 w] — c1..c2 모두 width w
+function parseEncodingHint(fontDict: PdfDict): string | undefined {
+  const enc = dictGet(fontDict, 'Encoding');
+  if (!enc) return undefined;
+  if (isName(enc)) return enc.value;
+  if (isDict(enc)) {
+    const base = dictGet(enc, 'BaseEncoding');
+    if (isName(base)) return base.value;
+  }
+  return undefined;
+}
+
+function makeSimpleDecoder(): FontInfo['decodeBytes'] {
+  return (bytes: Uint8Array) => {
+    const codes: number[] = [];
+    const lengths: number[] = [];
+    for (const b of bytes) {
+      codes.push(b);
+      lengths.push(1);
+    }
+    return { codes, lengths };
+  };
+}
+
+function makeCompositeDecoder(
+  doc: PdfDocument,
+  fontDict: PdfDict,
+  warnings: string[],
+): FontInfo['decodeBytes'] {
+  // Encoding 분석:
+  // - /Identity-H, /Identity-V → 2-byte 고정 (CID = code).
+  // - 명명된 표준 CMap (UniKS-UCS2-H 등) → 2-byte 고정 (대부분 단일 바이트 단위).
+  // - Stream → CMap 본문 분석으로 codeRanges 추출 → 가변 byte 가능.
+  const enc = dictGet(fontDict, 'Encoding');
+
+  let byteRanges: Array<{ low: number; high: number; bytes: number }> | null = null;
+
+  if (enc && isStream(enc)) {
+    try {
+      const cmap = parseToUnicodeCMap(decodeStream(enc));
+      if (cmap.codeRanges.length > 0) byteRanges = cmap.codeRanges;
+    } catch (e) {
+      warnings.push(`Encoding CMap parse failed: ${(e as Error).message}`);
+    }
+  }
+
+  // 기본: 2-byte 고정 (Identity-H, 명명된 표준 CMap의 일반적 형태)
+  if (!byteRanges) {
+    return (bytes: Uint8Array) => {
+      const codes: number[] = [];
+      const lengths: number[] = [];
+      let i = 0;
+      const n = bytes.length;
+      while (i + 1 < n) {
+        codes.push(((bytes[i]! << 8) | bytes[i + 1]!) & 0xffff);
+        lengths.push(2);
+        i += 2;
+      }
+      // 홀수 마지막 byte가 남으면 무시 (잘못된 입력 방어)
+      return { codes, lengths };
+    };
+  }
+
+  // 가변 byte: codeRanges에 따라 그리디 매칭
+  const sortedRanges = [...byteRanges].sort((a, b) => b.bytes - a.bytes);
+  return (bytes: Uint8Array) => {
+    const codes: number[] = [];
+    const lengths: number[] = [];
+    let i = 0;
+    const n = bytes.length;
+    while (i < n) {
+      let matched = false;
+      for (const r of sortedRanges) {
+        if (i + r.bytes > n) continue;
+        let v = 0;
+        for (let j = 0; j < r.bytes; j += 1) v = (v << 8) | bytes[i + j]!;
+        if (v >= r.low && v <= r.high) {
+          codes.push(v);
+          lengths.push(r.bytes);
+          i += r.bytes;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        // 매칭 실패: 1 byte 건너뛰기 (관용 처리)
+        i += 1;
+      }
+    }
+    return { codes, lengths };
+  };
+}
+
 function parseCIDWidths(
   w: { items: PdfObject[] },
   doc: PdfDocument,
@@ -196,7 +314,6 @@ function parseCIDWidths(
     if (!next) break;
     const nextR = doc.resolve(next);
     if (isArray(nextR)) {
-      // form 1
       for (let j = 0; j < nextR.items.length; j += 1) {
         const wv = asNumber(doc.resolve(nextR.items[j]!));
         if (wv !== undefined) out.set(aN + j, wv);
@@ -214,7 +331,6 @@ function parseCIDWidths(
   }
 }
 
-// 페이지 리소스에서 모든 폰트를 FontInfo로.
 export function buildFontMap(doc: PdfDocument, page: PdfDict): Map<string, FontInfo> {
   const resources = doc.pageResources(page);
   const fontsObj = dictGet(resources, 'Font');
@@ -227,7 +343,7 @@ export function buildFontMap(doc: PdfDocument, page: PdfDict): Map<string, FontI
     try {
       out.set(name, buildFontInfo(doc, name, fd));
     } catch {
-      // skip 폰트 — 안전한 fallback
+      // skip 폰트 — 안전한 fallback (다른 폰트는 처리 가능하도록)
     }
   }
   return out;

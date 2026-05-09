@@ -1,7 +1,7 @@
 // 텍스트 추출.
 //
-// 콘텐츠 스트림의 ops를 그래픽 상태 머신으로 돌리며 텍스트 위치를 계산.
-// 결과: 페이지 좌표계 기준의 TextRun 시퀀스.
+// 콘텐츠 스트림의 ops를 그래픽 상태 머신으로 돌리며 텍스트 위치 계산.
+// 결과: 페이지 좌표계 기준의 TextRun 시퀀스 + 진단.
 
 import { PdfDict } from '../core/object';
 import { PdfDocument } from '../parser/document';
@@ -9,21 +9,25 @@ import { ContentOp, ContentOpWithSource, parseContent } from './content-stream';
 import { FontInfo, buildFontMap } from '../fonts/font-info';
 
 export interface TextRun {
-  blockId: string; // 안정적 ID (`page${i}-op${idx}`)
+  blockId: string;
   text: string;
   // bbox: PDF 좌표계 (좌하 원점)
   x: number;
   y: number;
   width: number;
-  height: number; // 폰트 크기 기준
+  height: number;
   fontName: string; // resource name (예: 'F1')
-  fontBaseName: string; // BaseFont (예: 'Helvetica')
+  fontBaseName: string;
   fontSize: number;
-  isCJK: boolean;
-  // 편집 가능성 — 모든 글리프에 unicode 매핑 가능했는가
-  fullyDecoded: boolean;
-  // 원본 byte 위치 (편집 시 활용)
+  isComposite: boolean;
+  fullyDecoded: boolean; // 모든 글리프가 unicode로 매핑됐는가
   source: { contentByteStart: number; contentByteEnd: number; opIndex: number };
+}
+
+export interface TextExtractionResult {
+  runs: TextRun[];
+  /** 페이지에서 발견된 폰트별 진단 (편집 가능성 판단에 사용) */
+  fontDiagnostics: Array<{ name: string; baseName: string; warnings: string[]; hasUnicodeMap: boolean }>;
 }
 
 type Mat = [number, number, number, number, number, number];
@@ -54,7 +58,7 @@ interface TextState {
   Tr: number;
   Trise: number;
   Tm: Mat;
-  Tlm: Mat; // line matrix
+  Tlm: Mat;
 }
 
 interface GraphicsState {
@@ -80,13 +84,20 @@ export function extractTextFromPage(
   doc: PdfDocument,
   pageDict: PdfDict,
   pageIndex: number,
-): TextRun[] {
+): TextExtractionResult {
   const fontMap = buildFontMap(doc, pageDict);
+  const fontDiagnostics = [...fontMap.entries()].map(([name, f]) => ({
+    name,
+    baseName: f.baseName,
+    warnings: f.warnings,
+    hasUnicodeMap: f.hasUnicodeMap,
+  }));
+
   const content = doc.pageContent(pageDict);
-  if (content.length === 0) return [];
+  if (content.length === 0) return { runs: [], fontDiagnostics };
   const ops = parseContent(content);
 
-  const out: TextRun[] = [];
+  const runs: TextRun[] = [];
   const stack: GraphicsState[] = [];
   let cur: GraphicsState = {
     CTM: [...IDENTITY] as Mat,
@@ -101,35 +112,34 @@ export function extractTextFromPage(
     let text = '';
     let fullyDecoded = true;
     let advanceWidth = 0;
+    const horizontalScale = ts.Tz / 100;
     for (let i = 0; i < decoded.codes.length; i += 1) {
       const code = decoded.codes[i]!;
       const u = font.toUnicode(code);
-      if (u === undefined) {
+      if (u === null) {
         fullyDecoded = false;
-        text += '�';
+        // 디코드 실패는 *공란*으로 (가짜 ASCII 출력 금지 — A1 fix)
+        text += ' ';
       } else {
         text += u;
       }
-      const w = font.widthOf(code) / 1000; // em units
-      advanceWidth += w * ts.Tfs + ts.Tc + (code === 0x20 ? ts.Tw : 0);
+      const w = font.widthOf(code) / 1000;
+      advanceWidth +=
+        (w * ts.Tfs + ts.Tc + (decoded.lengths[i] === 1 && code === 0x20 ? ts.Tw : 0)) *
+        horizontalScale;
     }
-    // 텍스트 매트릭스 × CTM 으로 시작점 계산
     const final: Mat = multiply(cur.text.Tm, cur.CTM);
-    const x = final[4]!;
-    const y = final[5]!;
-    // height: 폰트 크기 그대로 사용
-    const fs = ts.Tfs;
-    out.push({
+    runs.push({
       blockId: `p${pageIndex}-op${opSource.opIndex}`,
       text,
-      x,
-      y,
+      x: final[4]!,
+      y: final[5]!,
       width: advanceWidth,
-      height: fs,
+      height: ts.Tfs,
       fontName: font.resourceName,
       fontBaseName: font.baseName,
-      fontSize: fs,
-      isCJK: font.isCJK,
+      fontSize: ts.Tfs,
+      isComposite: font.isComposite,
       fullyDecoded,
       source: {
         contentByteStart: opSource.start,
@@ -137,15 +147,16 @@ export function extractTextFromPage(
         opIndex: opSource.opIndex,
       },
     });
-    // text matrix 갱신: tx → Tx + advanceWidth (in *unscaled text space*) — 단순화하여 final.x 기반.
-    // 실제 PDF의 정확한 갱신은 horiz scaling 등이 들어가지만 우리는 다음 위치만 잡으면 됨.
     cur.text.Tm = translate(cur.text.Tm, advanceWidth, 0);
   }
 
   for (const { op, source } of ops) {
     switch (op.op) {
       case 'q':
-        stack.push({ CTM: [...cur.CTM] as Mat, text: { ...cur.text, Tm: [...cur.text.Tm] as Mat, Tlm: [...cur.text.Tlm] as Mat } });
+        stack.push({
+          CTM: [...cur.CTM] as Mat,
+          text: { ...cur.text, Tm: [...cur.text.Tm] as Mat, Tlm: [...cur.text.Tlm] as Mat },
+        });
         break;
       case 'Q':
         if (stack.length > 0) cur = stack.pop()!;
@@ -208,7 +219,6 @@ export function extractTextFromPage(
         processShow(source, op.bytes);
         break;
       case "'": {
-        // newline + show
         const m = multiply([1, 0, 0, 1, 0, -cur.text.Tl], cur.text.Tlm);
         cur.text.Tm = m;
         cur.text.Tlm = m;
@@ -225,31 +235,26 @@ export function extractTextFromPage(
         break;
       }
       case 'TJ': {
-        // 각 string을 보여주고, shift 만큼 advance.
         const ts = cur.text;
         const font = ts.Tf;
         if (!font || ts.Tfs === 0) break;
-        // 합쳐서 하나의 run으로 (단순화). 정확한 자간은 손실되지만 위치/텍스트는 유지.
         const allBytes: number[] = [];
         for (const item of op.items) {
           if (item.kind === 'bytes') for (const b of item.bytes) allBytes.push(b);
-          // shift는 advance에만 영향 — 텍스트에는 무시
         }
         if (allBytes.length > 0) processShow(source, new Uint8Array(allBytes));
-        // 추가로 shift도 advance에 반영
         for (const item of op.items) {
           if (item.kind === 'shift') {
-            const adv = (-item.v / 1000) * ts.Tfs;
+            const adv = (-item.v / 1000) * ts.Tfs * (ts.Tz / 100);
             cur.text.Tm = translate(cur.text.Tm, adv, 0);
           }
         }
         break;
       }
       default:
-        // 그래픽 색 등 — 무시
         break;
     }
   }
 
-  return out;
+  return { runs, fontDiagnostics };
 }

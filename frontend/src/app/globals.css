@@ -1,71 +1,251 @@
 @import 'tailwindcss';
 
+/* ============================================
+   Edit2me theme
+   세련된 라이트 우선 + 정제된 다크 (system 자동).
+   토큰: surface / canvas / line / ink / muted / accent / danger
+   ============================================ */
+
 @theme {
-  --color-paper: #ffffff;
-  --color-ink: #0a0a0a;
-  --color-muted: #6b7280;
-  --color-line: #e5e7eb;
-  --color-accent: #2563eb;
-  --color-danger: #dc2626;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
 }
 
-html,
-body {
+:root {
+  /* light */
+  --color-canvas: #f4f5f7;       /* page background outside paper */
+  --color-surface: #ffffff;       /* cards, sidebar, toolbar */
+  --color-surface-2: #fafbfc;     /* hover */
+  --color-line: #e5e7eb;
+  --color-line-strong: #d1d5db;
+  --color-ink: #0b1020;
+  --color-muted: #6b7280;
+  --color-muted-2: #9ca3af;
+  --color-accent: #4f46e5;        /* indigo-600 */
+  --color-accent-hover: #4338ca;
+  --color-accent-soft: rgba(79, 70, 229, 0.08);
+  --color-accent-ring: rgba(79, 70, 229, 0.35);
+  --color-danger: #dc2626;
+  --color-danger-soft: rgba(220, 38, 38, 0.08);
+  --color-success: #059669;
+  --color-warn: #d97706;
+  --shadow-paper: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 16px -8px rgba(15, 23, 42, 0.08);
+  --shadow-pop: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-canvas: #0b0d12;
+    --color-surface: #14161c;
+    --color-surface-2: #1b1e26;
+    --color-line: #232732;
+    --color-line-strong: #2c313e;
+    --color-ink: #e8eaed;
+    --color-muted: #9aa0a6;
+    --color-muted-2: #6c727a;
+    --color-accent: #818cf8;
+    --color-accent-hover: #a5b4fc;
+    --color-accent-soft: rgba(129, 140, 248, 0.14);
+    --color-accent-ring: rgba(129, 140, 248, 0.45);
+    --color-danger: #f87171;
+    --color-danger-soft: rgba(248, 113, 113, 0.14);
+    --color-success: #34d399;
+    --color-warn: #fbbf24;
+    --shadow-paper: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 16px -8px rgba(0, 0, 0, 0.5);
+    --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.6);
+  }
+}
+
+html, body {
   height: 100%;
 }
 
 body {
-  background: #f8fafc;
+  background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  font-feature-settings: 'cv11', 'ss01';
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-@media (prefers-color-scheme: dark) {
-  body {
-    background: #0a0a0a;
-    color: #e5e7eb;
-  }
-}
-
-/* Page paper visual */
+/* PDF page paper — 라이트/다크 동일하게 흰색 (PDF는 흰 종이 가정) */
 .paper {
-  background: white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  background: #ffffff;
+  color: #0b1020;
+  box-shadow: var(--shadow-paper);
+  border-radius: 4px;
 }
 
-@media (prefers-color-scheme: dark) {
-  .paper {
-    background: #fafafa;
-  }
+/* Skeleton shimmer */
+@keyframes skeleton-shimmer {
+  0% { background-position: -240px 0; }
+  100% { background-position: 240px 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-line) 0%,
+    var(--color-line-strong) 50%,
+    var(--color-line) 100%
+  );
+  background-size: 480px 100%;
+  animation: skeleton-shimmer 1.4s linear infinite;
+  border-radius: var(--radius-sm);
 }
 
-/* Hover affordance for editable text */
+/* Editable text overlay */
 .text-block {
   position: absolute;
   outline: 1px dashed transparent;
   cursor: text;
   white-space: pre;
   transform-origin: 0 0;
+  line-height: 1;
 }
-.text-block:hover {
+.text-block.editable:hover {
   outline-color: var(--color-accent);
-  background: rgba(37, 99, 235, 0.05);
+  background: var(--color-accent-soft);
 }
 .text-block.editing {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
-  background: rgba(37, 99, 235, 0.08);
+  background: var(--color-accent-soft);
+  z-index: 10;
+}
+.text-block.readonly {
+  cursor: default;
+}
+.text-block.readonly:hover {
+  outline-color: transparent;
+}
+
+[contenteditable]:focus {
+  outline: none;
 }
 
 /* Drag affordance */
 .drag-target-hover {
-  outline: 2px solid var(--color-accent);
-  background: rgba(37, 99, 235, 0.04);
+  box-shadow: 0 0 0 2px var(--color-accent);
 }
 
-/* Reduce default browser focus blue ring on contenteditable */
-[contenteditable]:focus {
-  outline: none;
+/* Custom thin scrollbar */
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 4px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 1;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-line);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  transition: background 0.12s ease, border-color 0.12s ease;
+  cursor: pointer;
+}
+.btn:hover {
+  background: var(--color-surface-2);
+  border-color: var(--color-line-strong);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #ffffff;
+}
+.btn-primary:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-muted);
+}
+.btn-ghost:hover {
+  background: var(--color-surface-2);
+  color: var(--color-ink);
+}
+.btn-icon {
+  padding: 8px;
+}
+
+/* Keyboard shortcut chip */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--color-line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--color-surface-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+/* Toast */
+.toast {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  color: var(--color-ink);
+  padding: 10px 14px;
+  font-size: 13px;
+}
+.toast-error {
+  border-left: 3px solid var(--color-danger);
+}
+.toast-warn {
+  border-left: 3px solid var(--color-warn);
+}
+.toast-success {
+  border-left: 3px solid var(--color-success);
+}
+
+/* Banner (페이지 진단) */
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.banner-info {
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
+}
+.banner-warn {
+  background: rgba(217, 119, 6, 0.1);
+  color: var(--color-ink);
+}
+.banner-error {
+  background: var(--color-danger-soft);
+  color: var(--color-ink);
 }

@@ -22,9 +22,9 @@ export async function GET(
   const h = ury - lly;
 
   // 텍스트 추출 — 일부만
-  let runs: ReturnType<typeof extractTextFromPage> = [];
+  let runs: ReturnType<typeof extractTextFromPage>['runs'] = [];
   try {
-    runs = extractTextFromPage(entry.doc, page.dict, pageIndex);
+    runs = extractTextFromPage(entry.doc, page.dict, pageIndex).runs;
   } catch {
     /* ignore */
   }

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import type { PageMeta } from '@/lib/api';
 import { thumbUrl } from '@/lib/api';
-import { Trash2, RotateCw, RotateCcw } from 'lucide-react';
+import { Trash2, RotateCw, RotateCcw, Layers } from 'lucide-react';
 
 interface Props {
   docId: string;
@@ -34,36 +34,31 @@ export function Sidebar({
   const [dropIdx, setDropIdx] = useState<number | null>(null);
 
   return (
-    <aside className="w-32 shrink-0 border-r border-[color:var(--color-line)] bg-[color:var(--color-paper)] flex flex-col">
-      <div className="px-2 py-2 text-xs text-[color:var(--color-muted)] flex items-center justify-between">
-        <span>{pages.length} 페이지</span>
+    <aside
+      className="w-44 shrink-0 flex flex-col border-r"
+      style={{ background: 'var(--color-surface)', borderColor: 'var(--color-line)' }}
+    >
+      <div className="px-3 py-2.5 flex items-center justify-between text-xs border-b border-[color:var(--color-line)]">
+        <div className="flex items-center gap-1.5 text-[color:var(--color-muted)]">
+          <Layers size={13} />
+          <span>{pages.length} 페이지{selected.size > 0 ? ` · ${selected.size} 선택` : ''}</span>
+        </div>
         {selected.size > 0 && (
-          <div className="flex gap-1">
-            <button
-              title="회전"
-              className="hover:text-[color:var(--color-ink)]"
-              onClick={() => onRotate([...selected], 90)}
-            >
-              <RotateCw size={14} />
-            </button>
-            <button
-              title="역회전"
-              className="hover:text-[color:var(--color-ink)]"
-              onClick={() => onRotate([...selected], -90)}
-            >
-              <RotateCcw size={14} />
-            </button>
-            <button
-              title="삭제"
-              className="hover:text-[color:var(--color-danger)]"
-              onClick={() => onDelete([...selected])}
-            >
-              <Trash2 size={14} />
-            </button>
+          <div className="flex gap-0.5">
+            <IconBtn title="역회전" onClick={() => onRotate([...selected], -90)}>
+              <RotateCcw size={13} />
+            </IconBtn>
+            <IconBtn title="회전" onClick={() => onRotate([...selected], 90)}>
+              <RotateCw size={13} />
+            </IconBtn>
+            <IconBtn title="삭제" onClick={() => onDelete([...selected])} danger>
+              <Trash2 size={13} />
+            </IconBtn>
           </div>
         )}
       </div>
-      <ol className="flex-1 overflow-y-auto px-2 pb-3 flex flex-col gap-2">
+
+      <ol className="flex-1 overflow-y-auto thin-scroll px-2.5 py-3 flex flex-col gap-2.5">
         {pages.map((p, i) => {
           const isActive = i === activeIndex;
           const isSelected = selected.has(i);
@@ -71,11 +66,7 @@ export function Sidebar({
           return (
             <li
               key={`${p.index}-${reload}`}
-              className={`relative rounded-md border cursor-pointer ${
-                isActive ? 'border-[color:var(--color-accent)]' : 'border-transparent'
-              } ${isSelected ? 'ring-2 ring-[color:var(--color-accent)]' : ''} ${
-                isDropTarget ? 'drag-target-hover' : ''
-              }`}
+              className="relative cursor-pointer"
               draggable
               onDragStart={() => setDragIdx(i)}
               onDragOver={(e) => {
@@ -104,19 +95,62 @@ export function Sidebar({
                 onActivate(i);
               }}
             >
-              <img
-                src={thumbUrl(docId, i, 110)}
-                alt={`page ${i + 1}`}
-                className="w-full h-auto block rounded-sm"
-                draggable={false}
-              />
-              <span className="absolute -bottom-1 right-0 text-[10px] bg-white/80 px-1 rounded">
+              <div
+                className={`relative rounded transition-shadow ${isDropTarget ? 'drag-target-hover' : ''}`}
+                style={{
+                  outline: isActive
+                    ? `2px solid var(--color-accent)`
+                    : isSelected
+                      ? `2px solid var(--color-accent-ring)`
+                      : `1px solid var(--color-line)`,
+                  outlineOffset: isActive || isSelected ? '0' : '0',
+                }}
+              >
+                <img
+                  src={thumbUrl(docId, i, 160)}
+                  alt={`page ${i + 1}`}
+                  className="w-full h-auto block rounded-sm"
+                  draggable={false}
+                />
+              </div>
+              <div
+                className="mt-1 text-[11px] text-center"
+                style={{
+                  color: isActive ? 'var(--color-accent)' : 'var(--color-muted)',
+                  fontWeight: isActive ? 600 : 400,
+                }}
+              >
                 {i + 1}
-              </span>
+              </div>
             </li>
           );
         })}
       </ol>
     </aside>
+  );
+}
+
+function IconBtn({
+  children,
+  title,
+  onClick,
+  danger,
+}: {
+  children: React.ReactNode;
+  title: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className="w-7 h-7 rounded inline-flex items-center justify-center hover:bg-[color:var(--color-surface-2)]"
+      style={{
+        color: danger ? 'var(--color-danger)' : 'var(--color-muted)',
+      }}
+    >
+      {children}
+    </button>
   );
 }

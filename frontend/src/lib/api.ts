@@ -33,9 +33,14 @@ export interface TextBlock {
   height: number;
   fontBaseName: string;
   fontSize: number;
-  isCJK: boolean;
+  isComposite: boolean;
   fullyDecoded: boolean;
   editable: boolean;
+}
+
+export interface FontWarning {
+  font: string;
+  warnings: string[];
 }
 
 export interface PageText {
@@ -44,6 +49,7 @@ export interface PageText {
   height: number;
   rotate: 0 | 90 | 180 | 270;
   blocks: TextBlock[];
+  fontWarnings: FontWarning[];
 }
 
 export async function uploadPdf(file: File): Promise<DocumentMeta> {
@@ -70,6 +76,16 @@ export async function getPageText(docId: string, idx: number): Promise<PageText>
   const res = await fetch(apiUrl(`/api/documents/${docId}/pages/${idx}/text`));
   if (!res.ok) throw new Error(`Failed to load page text (${res.status})`);
   return (await res.json()) as PageText;
+}
+
+export async function getPageTextBatch(
+  docId: string,
+  pages: number[],
+): Promise<{ pages: PageText[]; revision: number }> {
+  const param = pages.length === 0 ? '' : `?pages=${pages.join(',')}`;
+  const res = await fetch(apiUrl(`/api/documents/${docId}/pages/text${param}`));
+  if (!res.ok) throw new Error(`Failed to load batch text (${res.status})`);
+  return (await res.json()) as { pages: PageText[]; revision: number };
 }
 
 export function thumbUrl(docId: string, idx: number, w = 200): string {

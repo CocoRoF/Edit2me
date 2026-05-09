@@ -274,16 +274,23 @@ export class PdfDocument {
     return 0;
   }
 
-  // 페이지 콘텐츠 stream 단일 byte로 합치기 (배열이면 concat).
+  // 페이지 콘텐츠 stream 단일 byte로 합치기 (배열이면 concat). 결과는 ref 기준 캐시.
+  private contentCache = new Map<string, Uint8Array>();
+
   pageContent(page: PdfDict): Uint8Array {
+    // 캐시 키: /Contents 의 ref(s). 값이 변경되면 재계산.
     const c = dictGet(page, 'Contents');
     if (!c) return new Uint8Array();
+    const key = contentCacheKey(c);
+    if (key) {
+      const hit = this.contentCache.get(key);
+      if (hit) return hit;
+    }
+    let result: Uint8Array;
     if (isRef(c)) {
       const obj = this.resolve(c);
-      if (isStream(obj)) return decodeStream(obj);
-      return new Uint8Array();
-    }
-    if (isArray(c)) {
+      result = isStream(obj) ? decodeStream(obj) : new Uint8Array();
+    } else if (isArray(c)) {
       const parts: Uint8Array[] = [];
       for (const item of c.items) {
         const obj = this.resolve(item);
@@ -291,10 +298,19 @@ export class PdfDocument {
         // 콘텐츠 스트림 사이에 공백 1개 (§7.8.2)
         parts.push(new Uint8Array([0x20]));
       }
-      return concatBytes(parts);
+      result = concatBytes(parts);
+    } else if (isStream(c)) {
+      result = decodeStream(c);
+    } else {
+      result = new Uint8Array();
     }
-    if (isStream(c)) return decodeStream(c);
-    return new Uint8Array();
+    if (key) this.contentCache.set(key, result);
+    return result;
+  }
+
+  // 콘텐츠 캐시 무효화 (페이지 콘텐츠 수정 후 호출)
+  invalidateContentCache(): void {
+    this.contentCache.clear();
   }
 
   // ---- 변경 추적 ----
@@ -334,6 +350,19 @@ export class PdfDocument {
   setNextNum(n: number): void {
     this.nextNum = Math.max(this.nextNum, n);
   }
+}
+
+function contentCacheKey(c: PdfObject): string | null {
+  if (c.kind === 'ref') return `r${c.num}_${c.gen}`;
+  if (c.kind === 'array') {
+    const refs: string[] = [];
+    for (const item of c.items) {
+      if (item.kind === 'ref') refs.push(`${item.num}_${item.gen}`);
+      else return null; // 인라인 stream은 캐시 안 함 (안전)
+    }
+    return 'a:' + refs.join(',');
+  }
+  return null;
 }
 
 function concatBytes(parts: Uint8Array[]): Uint8Array {

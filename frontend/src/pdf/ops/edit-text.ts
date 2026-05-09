@@ -50,17 +50,17 @@ export function editText(doc: PdfDocument, spec: EditTextSpec): void {
   const page = pages[spec.pageIndex];
   if (!page) throw new EditTextError('Page not found', 'page-not-found');
 
-  const runs = extractTextFromPage(doc, page.dict, spec.pageIndex);
-  const target = runs.find((r) => r.blockId === spec.blockId);
+  const result = extractTextFromPage(doc, page.dict, spec.pageIndex);
+  const target = result.runs.find((r) => r.blockId === spec.blockId);
   if (!target) throw new EditTextError('Block not found', 'block-not-found');
 
   // 폰트 정보 — 단순 1바이트만 지원
   const fonts = buildFontMap(doc, page.dict);
   const font = fonts.get(target.fontName);
   if (!font) throw new EditTextError('Font not found', 'font-not-found');
-  if (font.isCJK) {
+  if (font.isComposite) {
     throw new EditTextError(
-      'CJK/composite font editing is not supported in v1',
+      'Composite (CID-keyed) font editing is not supported in v1',
       'unsupported-font',
     );
   }
