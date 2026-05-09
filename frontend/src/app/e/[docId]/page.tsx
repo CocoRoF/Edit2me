@@ -55,6 +55,7 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
   const [diagnostics, setDiagnostics] = useState<string[]>([]);
   const [diagnosticOpen, setDiagnosticOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // 초기 로드 + 모든 페이지 텍스트 batch 로드
   useEffect(() => {
@@ -336,6 +337,7 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
         diagnosticCount={diagnostics.length}
         onOpenDiagnostics={() => setDiagnosticOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
+        onToggleSidebar={() => setMobileSidebarOpen((o) => !o)}
       />
 
       {diagnostics.length > 0 && (
@@ -371,6 +373,19 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
           onDelete={handleDelete}
           onRotate={handleRotate}
           reload={reload}
+        />
+        <Sidebar
+          docId={docId}
+          pages={meta.pages}
+          activeIndex={activeIndex}
+          selected={selected}
+          onSelect={handleSelect}
+          onActivate={setActive}
+          onReorder={handleReorder}
+          onDelete={handleDelete}
+          onRotate={handleRotate}
+          reload={reload}
+          mobile={{ open: mobileSidebarOpen, onClose: () => setMobileSidebarOpen(false) }}
         />
         <div
           className="flex-1 overflow-auto thin-scroll flex flex-col items-center px-8 py-8 gap-6"
