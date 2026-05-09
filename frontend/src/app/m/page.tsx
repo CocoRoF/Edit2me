@@ -130,9 +130,9 @@ function MergePage() {
         </button>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         <aside
-          className="w-80 shrink-0 overflow-y-auto thin-scroll border-r"
+          className="w-full md:w-80 md:shrink-0 max-h-64 md:max-h-none overflow-y-auto thin-scroll border-b md:border-b-0 md:border-r"
           style={{ background: 'var(--color-surface)', borderColor: 'var(--color-line)' }}
         >
           {docs.map((d, srcIdx) => (

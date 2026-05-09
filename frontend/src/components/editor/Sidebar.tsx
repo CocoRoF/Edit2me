@@ -3,9 +3,9 @@
 import { useState } from 'react';
 import type { PageMeta } from '@/lib/api';
 import { thumbUrl } from '@/lib/api';
-import { Trash2, RotateCw, RotateCcw, Layers } from 'lucide-react';
+import { Trash2, RotateCw, RotateCcw, Layers, X } from 'lucide-react';
 
-interface Props {
+interface BaseProps {
   docId: string;
   pages: PageMeta[];
   activeIndex: number;
@@ -18,30 +18,91 @@ interface Props {
   reload?: number;
 }
 
-export function Sidebar({
-  docId,
-  pages,
-  activeIndex,
-  selected,
-  onSelect,
-  onActivate,
-  onReorder,
-  onDelete,
-  onRotate,
-  reload,
-}: Props) {
+interface Props extends BaseProps {
+  /** 모바일 drawer 모드: visibility + 닫기 */
+  mobile?: { open: boolean; onClose: () => void };
+}
+
+export function Sidebar(props: Props) {
+  const { mobile, ...base } = props;
+
+  if (mobile) {
+    return (
+      <>
+        {mobile.open && (
+          <div
+            className="md:hidden fixed inset-0 z-30"
+            style={{ background: 'rgba(0,0,0,0.45)' }}
+            onClick={mobile.onClose}
+          />
+        )}
+        <aside
+          className="md:hidden fixed left-0 top-0 bottom-0 z-40 w-60 flex flex-col border-r transition-transform"
+          style={{
+            background: 'var(--color-surface)',
+            borderColor: 'var(--color-line)',
+            transform: mobile.open ? 'none' : 'translateX(-100%)',
+          }}
+        >
+          <header
+            className="h-12 px-3 flex items-center justify-between border-b shrink-0"
+            style={{ borderColor: 'var(--color-line)' }}
+          >
+            <span className="text-sm font-medium">페이지</span>
+            <button
+              onClick={mobile.onClose}
+              className="text-[color:var(--color-muted)] hover:text-[color:var(--color-ink)]"
+              aria-label="Close"
+            >
+              <X size={16} />
+            </button>
+          </header>
+          <SidebarBody
+            {...base}
+            onActivate={(i) => {
+              base.onActivate(i);
+              mobile.onClose();
+            }}
+          />
+        </aside>
+      </>
+    );
+  }
+
+  return (
+    <aside
+      className="hidden md:flex w-44 shrink-0 flex-col border-r"
+      style={{ background: 'var(--color-surface)', borderColor: 'var(--color-line)' }}
+    >
+      <SidebarBody {...base} />
+    </aside>
+  );
+}
+
+function SidebarBody(props: BaseProps) {
+  const {
+    docId,
+    pages,
+    activeIndex,
+    selected,
+    onSelect,
+    onActivate,
+    onReorder,
+    onDelete,
+    onRotate,
+    reload,
+  } = props;
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
 
   return (
-    <aside
-      className="w-44 shrink-0 flex flex-col border-r"
-      style={{ background: 'var(--color-surface)', borderColor: 'var(--color-line)' }}
-    >
+    <>
       <div className="px-3 py-2.5 flex items-center justify-between text-xs border-b border-[color:var(--color-line)]">
         <div className="flex items-center gap-1.5 text-[color:var(--color-muted)]">
           <Layers size={13} />
-          <span>{pages.length} 페이지{selected.size > 0 ? ` · ${selected.size} 선택` : ''}</span>
+          <span>
+            {pages.length} 페이지{selected.size > 0 ? ` · ${selected.size} 선택` : ''}
+          </span>
         </div>
         {selected.size > 0 && (
           <div className="flex gap-0.5">
@@ -103,7 +164,7 @@ export function Sidebar({
                     : isSelected
                       ? `2px solid var(--color-accent-ring)`
                       : `1px solid var(--color-line)`,
-                  outlineOffset: isActive || isSelected ? '0' : '0',
+                  outlineOffset: '0',
                 }}
               >
                 <img
@@ -126,7 +187,7 @@ export function Sidebar({
           );
         })}
       </ol>
-    </aside>
+    </>
   );
 }
 

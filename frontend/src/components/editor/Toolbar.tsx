@@ -2,7 +2,7 @@
 
 import {
   Plus, Download, Loader2, FileText, Minus, ZoomIn, Undo2, Redo2,
-  HelpCircle, AlertTriangle,
+  HelpCircle, AlertTriangle, Menu,
 } from 'lucide-react';
 import { Kbd } from '@/components/ui/Kbd';
 
@@ -25,6 +25,8 @@ interface Props {
   diagnosticCount: number;
   onOpenDiagnostics: () => void;
   onOpenHelp: () => void;
+  /** 모바일에서 sidebar drawer 열기 */
+  onToggleSidebar?: () => void;
 }
 
 export function Toolbar({
@@ -46,28 +48,39 @@ export function Toolbar({
   diagnosticCount,
   onOpenDiagnostics,
   onOpenHelp,
+  onToggleSidebar,
 }: Props) {
   return (
     <header
-      className="h-14 flex items-center px-3 gap-2 shrink-0 border-b"
+      className="h-14 flex items-center px-2 sm:px-3 gap-1.5 sm:gap-2 shrink-0 border-b"
       style={{ background: 'var(--color-surface)', borderColor: 'var(--color-line)' }}
     >
+      {onToggleSidebar && (
+        <button
+          onClick={onToggleSidebar}
+          className="btn btn-ghost btn-icon md:hidden"
+          aria-label="페이지 목록"
+        >
+          <Menu size={18} />
+        </button>
+      )}
+
       <button
         onClick={onHome}
-        className="flex items-center gap-2 px-2 py-1 rounded hover:bg-[color:var(--color-surface-2)]"
+        className="hidden sm:flex items-center gap-2 px-2 py-1 rounded hover:bg-[color:var(--color-surface-2)]"
       >
         <span className="text-sm font-semibold">Edit2me</span>
       </button>
 
-      <span className="mx-1 text-[color:var(--color-line-strong)]">/</span>
+      <span className="hidden sm:inline mx-1 text-[color:var(--color-line-strong)]">/</span>
 
-      <FileText size={14} className="text-[color:var(--color-muted)]" />
-      <span className="text-sm truncate max-w-xs" title={docName}>
+      <FileText size={14} className="hidden sm:inline text-[color:var(--color-muted)]" />
+      <span className="text-sm truncate max-w-[40vw] sm:max-w-xs" title={docName}>
         {docName}
       </span>
-      <span className="text-xs text-[color:var(--color-muted)]">{pageCount}p</span>
+      <span className="hidden sm:inline text-xs text-[color:var(--color-muted)]">{pageCount}p</span>
       <span
-        className="text-xs px-1.5 py-0.5 rounded"
+        className="hidden sm:inline text-xs px-1.5 py-0.5 rounded"
         style={{
           background: modified ? 'var(--color-accent-soft)' : 'transparent',
           color: modified ? 'var(--color-accent)' : 'var(--color-muted)',
@@ -103,12 +116,12 @@ export function Toolbar({
         title="텍스트 추가 모드 (T)"
       >
         <Plus size={16} />
-        <span>텍스트</span>
-        <Kbd>T</Kbd>
+        <span className="hidden sm:inline">텍스트</span>
+        <span className="hidden md:inline"><Kbd>T</Kbd></span>
       </button>
 
       <div
-        className="flex items-stretch border rounded overflow-hidden"
+        className="hidden sm:flex items-stretch border rounded overflow-hidden"
         style={{ borderColor: 'var(--color-line)' }}
       >
         <button
@@ -150,14 +163,14 @@ export function Toolbar({
         </button>
       )}
 
-      <button onClick={onOpenHelp} className="btn btn-ghost btn-icon" title="키보드 단축키 (?)">
+      <button onClick={onOpenHelp} className="hidden sm:inline-flex btn btn-ghost btn-icon" title="키보드 단축키 (?)">
         <HelpCircle size={16} />
       </button>
 
       <button onClick={onDownload} disabled={downloading} className="btn btn-primary">
         {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-        <span>다운로드</span>
-        <Kbd>⌘S</Kbd>
+        <span className="hidden sm:inline">다운로드</span>
+        <span className="hidden md:inline"><Kbd>⌘S</Kbd></span>
       </button>
     </header>
   );
