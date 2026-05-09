@@ -67,9 +67,26 @@ ADR: [`docs/adr/`](./docs/adr/)
 - Next.js 15 (App Router) — UI + API Route Handlers
 - React 19 + TypeScript + Tailwind CSS 4 (hr_blog2.0과 동일 스택)
 - Node.js 20+ 런타임 (API 측 PDF 파싱)
-- MinIO (S3 호환, hr_blog2.0 인스턴스 공유, 별도 버킷)
+- S3 호환 객체 스토리지 (MinIO 등) — 호스트가 제공
 
 추가 의존성은 ADR을 통해서만 들어온다.
+
+## Configuration (환경변수)
+
+Edit2me는 **자체 `.env` 파일을 가지지 않는다.** 모든 설정은 호스트(예: `hr_blog2.0`의 docker-compose)가 컨테이너에 환경변수로 주입한다. 라이브러리는 자기를 호스팅하는 환경을 알지 않는다.
+
+| 변수 | 필수 | 기본값 | 설명 |
+|---|---|---|---|
+| `NEXT_PUBLIC_BASE_PATH` | 권장 | `/edit2me` | URL prefix. 빌드/런타임 양쪽에 필요. |
+| `MINIO_ENDPOINT` | ✓ | `localhost:9000` | `host:port` |
+| `MINIO_ACCESS_KEY` | ✓ | (없음, warn) | S3 자격증명 |
+| `MINIO_SECRET_KEY` | ✓ | (없음, warn) | S3 자격증명 |
+| `MINIO_BUCKET` | — | `edit2me` | 업로드/결과를 둘 버킷 |
+| `MINIO_SECURE` | — | `false` | `true`면 https |
+| `EDIT2ME_MAX_UPLOAD_MB` | — | `200` | 업로드 한도 |
+| `EDIT2ME_DOC_TTL_HOURS` | — | `24` | (현재는 운영자가 버킷 라이프사이클로 적용) |
+
+**호스트 측 통합 예시**: hr_blog2.0의 [`docker-compose.dev.yml`](../hr_blog2.0/docker-compose.dev.yml) 의 `edit2me-frontend` 서비스가 `environment:` 블록으로 위 변수를 직접 주입한다. Edit2me repo 안에는 어떤 `.env*` 파일도 두지 않는다.
 
 ## 라이선스
 

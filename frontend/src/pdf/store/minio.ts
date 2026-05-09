@@ -13,11 +13,22 @@ import {
   HeadBucketCommand,
 } from '@aws-sdk/client-s3';
 
-const endpoint = process.env.MINIO_ENDPOINT ?? 'minio:9000';
-const accessKeyId = process.env.MINIO_ACCESS_KEY ?? 'minioadmin';
-const secretAccessKey = process.env.MINIO_SECRET_KEY ?? 'minioadmin123';
-const bucket = process.env.MINIO_BUCKET ?? 'pdf-edit';
+// 모든 값은 외부(host docker-compose 등)에서 주입.
+// Edit2me는 hr_blog2.0이나 특정 호스트를 알지 않는다.
+// standalone 로컬 개발 시 기본값으로 localhost:9000을 쓰지만,
+// 운영 배포는 반드시 환경변수를 명시적으로 설정해야 한다.
+const endpoint = process.env.MINIO_ENDPOINT ?? 'localhost:9000';
+const accessKeyId = process.env.MINIO_ACCESS_KEY ?? '';
+const secretAccessKey = process.env.MINIO_SECRET_KEY ?? '';
+const bucket = process.env.MINIO_BUCKET ?? 'edit2me';
 const secure = (process.env.MINIO_SECURE ?? 'false') === 'true';
+
+if (!accessKeyId || !secretAccessKey) {
+  // 시작 시점에는 throw하지 않고, 처음 호출 시점까지 허용 (CI 빌드 등).
+  // putUpload 등 실제 호출이 일어나는 시점에 SDK 가 InvalidAccessKeyId로 실패.
+  // 운영에서는 docker-compose `environment:`에서 반드시 주입해야 한다.
+  console.warn('[edit2me] MINIO_ACCESS_KEY / MINIO_SECRET_KEY not set');
+}
 
 let client: S3Client | null = null;
 function getClient(): S3Client {
