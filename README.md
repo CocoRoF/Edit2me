@@ -2,7 +2,7 @@
 
 브라우저에서 동작하는 PDF 온라인 편집기. PDF 파서/라이터를 외부 라이브러리 없이 **PDF 객체 레벨에서 직접 구현**하는 것을 핵심 원칙으로 한다.
 
-> **상태**: 계획 단계. 코드는 아직 없음. 먼저 [docs/](./docs/)의 설계 문서를 모두 합의한 뒤 구현에 들어간다.
+> **상태**: v0.2 (PR #1–9 완료). 동작 가능. 5개 MVP 기능 + undo/redo + i18n + 단위 테스트 + 모바일 반응형까지. 진행 내역은 [`docs/14-v0.2-changelog.md`](./docs/14-v0.2-changelog.md), 미완 항목은 [`docs/13-quality-review.md`](./docs/13-quality-review.md).
 
 ## 핵심 제약 (Non-negotiable)
 
@@ -64,6 +64,8 @@
 | 10 | [roadmap.md](./docs/10-roadmap.md) | 단계별 마일스톤 |
 | 11 | [testing.md](./docs/11-testing.md) | 테스트 전략과 코퍼스 |
 | 12 | [risks.md](./docs/12-risks.md) | 리스크와 미해결 질문 |
+| 13 | [quality-review.md](./docs/13-quality-review.md) | v0 audit + v0.2 진행 체크리스트 |
+| 14 | [v0.2-changelog.md](./docs/14-v0.2-changelog.md) | PR #1–9 변경 요약 |
 
 ADR: [`docs/adr/`](./docs/adr/)
 
@@ -92,6 +94,23 @@ Edit2me는 **자체 `.env` 파일을 가지지 않는다.** 모든 설정은 호
 | `EDIT2ME_DOC_TTL_HOURS` | — | `24` | (현재는 운영자가 버킷 라이프사이클로 적용) |
 
 **호스트 측 통합 예시**: hr_blog2.0의 [`docker-compose.dev.yml`](../hr_blog2.0/docker-compose.dev.yml) 의 `edit2me-frontend` 서비스가 `environment:` 블록으로 위 변수를 직접 주입한다. Edit2me repo 안에는 어떤 `.env*` 파일도 두지 않는다.
+
+## 개발 명령
+
+```bash
+# 로컬 standalone (host 없이)
+cd frontend/src
+npm install
+npm run dev          # 3000 포트, basePath /edit2me
+
+# 검증
+npm run typecheck    # tsc --noEmit
+npm run test         # vitest run (29개 단위 테스트)
+npm run build        # next build (production)
+
+# CJK CMap 데이터 다운로드 (Adobe-Korea1/Japan1/GB1/CNS1)
+npm run build:cmaps  # frontend/src/pdf/fonts/cid-mappings/data/*.json 생성
+```
 
 ## 라이선스
 

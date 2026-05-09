@@ -107,6 +107,14 @@
 - F7: 자체 raster 렌더러 (큰 작업) — 사용자 가치가 높으면 우선순위 상향.
 - F9: hr_blog2.0 인증 통합 — 사용자가 자기 파일을 영구 보관할 수 있게.
 
+## 실제 진행 (v0.2 종료 시점)
+
+- ✅ Phase 0–6 동작 — 5개 MVP 기능 + undo/redo + i18n + 모바일 + 단위 테스트
+- 🔄 Phase 5 (CJK 1급 지원): infrastructure done, 데이터 번들은 운영자 `build:cmaps` 실행으로 활성
+- ⏳ Phase 7 (자체 raster): 미시작. 사용자 피드백에 따라 우선순위 결정.
+
+자세한 PR-by-PR 변경은 [`docs/14-v0.2-changelog.md`](./14-v0.2-changelog.md).
+
 ## 마일스톤별 사용자 가치
 
 | 끝 | 사용자가 할 수 있는 것 |

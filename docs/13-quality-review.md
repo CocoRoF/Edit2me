@@ -168,18 +168,30 @@ components/
 
 자동 테스트는 v0.2에서 도입.
 
-## 5. 다음 두 사이클 plan (v0.2, v0.3)
+## 5. v0.2 진행 상황 (PR #1–9 종료 시점)
 
-### v0.2 — 한국어 PDF 1급 지원
-- Adobe-Korea1-UCS2 CMap 번들 (압축 후 ~150KB)
-- usecmap 부모 체인 따라가기
-- Identity-H + ToUnicode 결손 PDF에 대해 폰트 BaseFont 이름과 CIDSystemInfo로 자동 매칭
-- TJ advance 보정 (편집 후 위치 안정화)
-- Korean 폰트로 텍스트 *추가* (사용자 업로드 TTF subset embedding)
+세부 변경은 [`docs/14-v0.2-changelog.md`](./14-v0.2-changelog.md). 본 audit 의 항목별 진행 상태:
 
-### v0.3 — 운영 견고성
-- Undo/Redo
-- 진단 패널 UI
-- 페이지 가상화 (큰 PDF 빠른 스크롤)
-- 단위 테스트 + 코퍼스 자동 회귀
-- 다국어 (en/ko)
+### 처리 완료
+- ✅ A4 (인프라) — Adobe CID→Unicode infrastructure (PR #1). 표준 CMap 데이터 fetch 스크립트 포함.
+- ✅ A9 — Edit-text 후 TJ advance 보정 (PR #2)
+- ✅ B7 — IntersectionObserver 기반 페이지 가상화 (PR #4)
+- ✅ B11 — 키보드 단축키 모달 (PR #5)
+- ✅ B12 — 진단 패널 (PR #5)
+- ✅ B13 — 모바일 반응형 (PR #6)
+- ✅ C6 — LRU 객체 캐시 (PR #2)
+- ✅ D1 — Undo/Redo (PR #3)
+- ✅ E3 — 단위 테스트 (PR #8)
+- ✅ i18n — ko/en (PR #7) — 새 항목
+
+### 보류 / v0.3 후보
+- A4 잔여: `build:cmaps` 의 호스트 자동 실행
+- A7 — content stream 파서 최적화 (선 측정)
+- A8 — vertical writing mode
+- A11 — 진단 시스템 항상 채우기 (정상 케이스도 정보 진단 추가)
+- C5 — surgical update (response → 클라이언트 부분 갱신)
+- D3 — 사용자 TTF subset embedding (한글 텍스트 추가)
+- D4 — 회전 페이지에서 add-text 좌표 보정
+- E1 — `as` 단언 축소 + 입력 validation (zod)
+- E2 — 클라이언트 fetch 캐시 (SWR-like)
+- 자체 raster renderer ([`05-renderer.md`](./05-renderer.md) Phase 2~3)
