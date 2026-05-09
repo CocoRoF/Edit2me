@@ -1,0 +1,229 @@
+# 09. hr_blog2.0 Integration
+
+> Edit2me는 **별도 repo**에서 개발되지만, 배포는 **hr_blog2.0의 docker-compose에 service로 합류**한다. 이 문서는 그 통합 방식을 정의한다.
+
+## 한 줄 결정
+
+| 항목 | 결정 |
+|---|---|
+| 코드베이스 | 별도 git repo. hr_blog2.0과 sub-module/sub-tree 관계 안 가짐. |
+| 디렉토리 배치 (개발) | `~/.../prj-doc/Edit2me` 와 `~/.../prj-doc/hr_blog2.0` 형제 관계. |
+| 배포 단위 | 별도 docker 이미지(`edit2me-frontend`). hr_blog2.0의 compose에 service 1개 추가. |
+| URL 경로 | `https://hrletsgo.me/edit2me/...` (Next.js basePath = `/edit2me`). |
+| MinIO | hr_blog2.0 인스턴스 공유. 별도 버킷 `pdf-edit`. |
+| nginx | hr_blog2.0의 nginx에 `/edit2me/*` 라우팅 location 추가. |
+| 인증 | 1차 무인증. 후일 hr_blog2.0 세션 쿠키 공유 가능. |
+| DB | 1차 미사용 (in-memory). 필요해지면 hr_blog2.0 PostgreSQL에 별도 schema. |
+
+→ ADR: [`adr/0003-mount-under-hr-blog.md`](./adr/0003-mount-under-hr-blog.md).
+
+## 1. nginx 라우팅 추가
+
+`hr_blog2.0/nginx/default.conf` 와 `default.dev.conf` 에 location 블록 추가:
+
+```nginx
+# /edit2me/* → edit2me-frontend
+# basePath=/edit2me 로 빌드된 Next.js 가 모든 라우트를 자체 처리
+location /edit2me/ {
+    set $edit2me_up http://edit2me-frontend:3000;
+    proxy_pass $edit2me_up;
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+
+    # 큰 PDF 업로드
+    client_max_body_size 200m;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_request_buffering off;
+}
+
+# Next.js의 _next 정적 자원도 basePath 아래에 떨어진다 (자동).
+# 별도 location 불필요.
+```
+
+`default.dev.conf`에는 위 `set $edit2me_up ...` 대신 upstream 블록도 추가:
+```nginx
+upstream edit2me { server edit2me-frontend:3000; }
+```
+
+**주의**: `client_max_body_size`는 nginx.conf의 50m을 200m로 *전역* 올리거나, 위 location에서 *덮어쓰기*. 후자가 안전 — 다른 라우트에는 영향 X.
+
+## 2. docker-compose 통합
+
+### 개발 (`docker-compose.dev.yml`)
+
+기존 파일 끝(`volumes:` 직전)에 service 추가:
+
+```yaml
+  # ============================================
+  # Edit2me Frontend (dev)
+  # 별도 repo. ../Edit2me/frontend 를 build context로 사용.
+  # 코드 변경 시 HMR 동작.
+  # ============================================
+  edit2me-frontend:
+    container_name: new-web-edit2me-dev
+    build:
+      context: ../Edit2me/frontend
+      dockerfile: Dockerfile.dev
+    env_file: ../Edit2me/frontend/.env.dev
+    environment:
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true
+      - NEXT_PUBLIC_BASE_PATH=/edit2me
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin123
+      - MINIO_BUCKET=pdf-edit
+      - MINIO_SECURE=false
+    volumes:
+      - ../Edit2me/frontend/src:/app
+      - /app/node_modules
+      - /app/.next
+    expose:
+      - "3000"
+    ports:
+      - "53001:3000"      # 직접 접근(개발 디버그용)
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+```
+
+### 운영 (`docker-compose.prod.yml`)
+
+```yaml
+  edit2me-frontend:
+    container_name: new-web-edit2me
+    build:
+      context: ../Edit2me/frontend
+      dockerfile: Dockerfile
+    env_file: ../Edit2me/frontend/.env
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_BASE_PATH=/edit2me
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_BUCKET=pdf-edit
+    expose:
+      - "3000"
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: always
+```
+
+`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`는 backend의 `.env`와 동일하게 주입 — `env_file` 또는 `${...}` interpolate.
+
+## 3. MinIO 통합
+
+### 버킷 구조
+```
+hr_blog2.0의 단일 MinIO 인스턴스
+├── blog-images/          ← 기존 (hr_blog2.0)
+└── pdf-edit/             ← 신규 (Edit2me 전용)
+    ├── uploads/{docId}.pdf
+    └── results/{docId}-{revision}.pdf
+```
+
+### 버킷 생성/정책
+첫 부팅 시 Edit2me 컨테이너 자체가 부재하면 생성하는 로직 (idempotent). 또는 hr_blog2.0의 `scripts/`에 `setup-minio-buckets.sh` 추가:
+```bash
+mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}
+mc mb -p local/pdf-edit
+mc ilm import local/pdf-edit <<EOF
+{ "Rules": [{ "ID": "expire-24h", "Status": "Enabled",
+              "Expiration": { "Days": 1 }, "Filter": { "Prefix": "uploads/" } }] }
+EOF
+```
+
+### 정책 (라이프사이클)
+- `pdf-edit/uploads/*`: 24시간 만료.
+- `pdf-edit/results/*`: 24시간 만료.
+
+### 자격 증명
+Edit2me 컨테이너는 *루트 자격증명*이 아닌 별도 service account를 받는 게 좋다 — 그러나 Phase 1은 단순화 위해 동일 자격증명 사용. Phase 2에 분리.
+
+## 4. nginx에서 다운로드 처리
+
+`/uploads/*` location은 `blog-images` 버킷으로 rewrite 중. 우리는 다운로드를 *MinIO 직접*이 아닌 **Edit2me API 라우트가 stream proxy**하므로 nginx 변경 불필요. `/edit2me/api/documents/{docId}/download/{token}` → edit2me-frontend → MinIO → 사용자.
+
+## 5. 환경 변수 합의
+
+| 변수 | hr_blog2.0 | Edit2me |
+|---|---|---|
+| `MINIO_ENDPOINT` | `minio:9000` | `minio:9000` |
+| `MINIO_ACCESS_KEY` | shared | shared |
+| `MINIO_SECRET_KEY` | shared | shared |
+| `MINIO_BUCKET` | `blog-images` | `pdf-edit` |
+| `MINIO_SECURE` | `false` (dev) | `false` (dev) |
+| `INTERNAL_REVALIDATE_SECRET` | 사용 | 사용 안 함 (1차) |
+
+Edit2me의 `.env.example` 참고:
+```dotenv
+NODE_ENV=production
+NEXT_PUBLIC_BASE_PATH=/edit2me
+MINIO_ENDPOINT=minio:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin123
+MINIO_BUCKET=pdf-edit
+MINIO_SECURE=false
+EDIT2ME_MAX_UPLOAD_MB=200
+EDIT2ME_DOC_TTL_HOURS=24
+```
+
+## 6. 헬스체크
+
+`edit2me-frontend`에 `/api/health` 라우트:
+```jsonc
+{ "status": "ok", "version": "0.1.0", "minio": "ok" }
+```
+
+docker compose의 `healthcheck`로 nginx가 부팅 순서를 안다.
+
+## 7. 빌드 / 배포 파이프라인 (제안)
+
+**옵션 A — 수동**: hr_blog2.0 호스트에서 `docker compose -f docker-compose.prod.yml up -d --build edit2me-frontend` 만 실행. Edit2me repo가 `../Edit2me`에 clone되어 있어야 함.
+
+**옵션 B — CI**: Edit2me repo에 GitHub Actions → Docker 이미지 빌드 후 GHCR 푸시 → hr_blog2.0의 compose에서 `image: ghcr.io/.../edit2me:tag`로 변경. *깔끔하지만 인프라 추가 필요*. v2.
+
+→ MVP는 옵션 A.
+
+## 8. CORS / 쿠키 / 보안
+
+- 같은 origin (hrletsgo.me)이라 CORS 무관.
+- 쿠키: `e2m_session`을 `Path=/edit2me; HttpOnly; SameSite=Lax; Secure`. hr_blog2.0의 다른 쿠키와 격리.
+- CSP: hr_blog2.0이 CSP를 두지 않고 있다면 변화 없음. Edit2me 자체 라우트에서 추가 헤더 설정.
+
+## 9. URL 경로 일관성 체크
+
+basePath의 효과:
+- 정적 자원: `/edit2me/_next/static/...` → 자동.
+- 라우트: `/edit2me/e/abc` → app/e/[docId]/page.tsx.
+- API: `/edit2me/api/documents` → app/api/documents/route.ts.
+- 클라이언트 fetch: `'/api/documents'` 라고 쓰면 안 됨, `/edit2me/api/documents` 또는 `process.env.NEXT_PUBLIC_BASE_PATH` 활용.
+
+→ `lib/api.ts`에 `apiUrl(path)` 헬퍼 도입:
+```ts
+export const apiUrl = (p: string) => `${process.env.NEXT_PUBLIC_BASE_PATH ?? ''}${p}`;
+```
+
+## 10. 마이그레이션 / 롤백
+
+- 첫 배포: nginx 설정 + docker-compose service 추가 + Edit2me repo clone. 롤백은 nginx location 제거 + service 제거.
+- DB 변경 없음 (1차).
+- MinIO에 새 버킷이 생기지만 hr_blog2.0 코드에 영향 없음.
+
+## 11. 다음 단계 시 검토
+
+| 트리거 | 추가 작업 |
+|---|---|
+| 사용자 인증 도입 | hr_blog2.0의 세션 미들웨어를 공유. JWT or session cookie. |
+| 영구 저장 | Postgres에 `edit2me_documents` 스키마. |
+| 사용량/요금 | hr_blog2.0의 admin UI에 사용량 패널 추가. |
+| 분석 | hr_blog2.0의 metric pipeline에 `edit2me.*` namespace. |
