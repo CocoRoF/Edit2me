@@ -14,13 +14,15 @@ export interface TextRun {
   // bbox: PDF 좌표계 (좌하 원점)
   x: number;
   y: number;
-  width: number;
+  width: number; // text space units (advance — Td 보정 단위와 동일)
   height: number;
-  fontName: string; // resource name (예: 'F1')
+  fontName: string;
   fontBaseName: string;
   fontSize: number;
   isComposite: boolean;
-  fullyDecoded: boolean; // 모든 글리프가 unicode로 매핑됐는가
+  fullyDecoded: boolean;
+  /** 원본 byte 시퀀스 (코드들 — 1바이트 폰트면 byte 배열 그대로). edit-text 의 advance 보정에 사용. */
+  rawCodeBytes: Uint8Array;
   source: { contentByteStart: number; contentByteEnd: number; opIndex: number };
 }
 
@@ -141,6 +143,7 @@ export function extractTextFromPage(
       fontSize: ts.Tfs,
       isComposite: font.isComposite,
       fullyDecoded,
+      rawCodeBytes: new Uint8Array(bytes),
       source: {
         contentByteStart: opSource.start,
         contentByteEnd: opSource.end,

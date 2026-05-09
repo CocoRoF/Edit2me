@@ -78,9 +78,32 @@ export function editText(doc: PdfDocument, spec: EditTextSpec): void {
       );
     }
   }
-  const newOpBytes = new TextEncoder().encode(
-    `(${escapeLiteralBytes(new Uint8Array(newBytes))}) Tj\n`,
-  );
+
+  // Advance 보정: 원본 op이 만들었던 text matrix 이동량과 새 op이 만들 이동량의
+  // 차이만큼 Td 로 보정해, 같은 줄의 후속 텍스트 위치 보존.
+  // 단위: text space (Td 와 동일).
+  const fontSize = target.fontSize;
+  let oldAdvance = 0;
+  for (const code of target.rawCodeBytes) {
+    oldAdvance += (font.widthOf(code) / 1000) * fontSize;
+  }
+  let newAdvance = 0;
+  for (const code of newBytes) {
+    newAdvance += (font.widthOf(code) / 1000) * fontSize;
+  }
+  const advanceDelta = oldAdvance - newAdvance;
+
+  let opStr = `(${escapeLiteralBytes(new Uint8Array(newBytes))}) Tj`;
+  if (Math.abs(advanceDelta) > 0.001) {
+    // Td <delta> 0 — text matrix 와 line matrix 둘 다 이동.
+    // 그러나 다음 텍스트가 line의 시작점부터 새로 그릴 수도 있으므로
+    // text matrix만 보정하는 건 어렵다. 가장 호환성 좋은 방법은 정확히 같은
+    // 만큼 text matrix를 평행이동하는 cm 식이지만 BT/ET 안에선 cm 사용 불가.
+    // → 다음 토큰이 자기 위치를 절대 지정 (Tm) 한다면 우리 보정은 무시되고 OK.
+    //   상대 이동 (Td/T*) 하면 우리 보정이 더해져 시각적 일관 유지.
+    opStr += ` ${advanceDelta.toFixed(3)} 0 Td`;
+  }
+  const newOpBytes = new TextEncoder().encode(opStr + '\n');
 
   // 콘텐츠 stream을 *디코드한 byte*에서 해당 op 위치를 찾아 교체.
   // 우리는 페이지의 모든 콘텐츠를 단일 byte로 합쳐 작업한 뒤,
