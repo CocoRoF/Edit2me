@@ -27,6 +27,7 @@ import {
 import { ParseError, Tokenizer } from '../core/tokenizer';
 import { decodeStream } from '../core/stream';
 import { FullXref, XrefEntry, loadAllXref } from '../core/xref';
+import { LRUCache } from '../core/lru';
 import { Lexer } from './lexer';
 
 export interface OpenOptions {
@@ -53,8 +54,8 @@ export class PdfDocument {
   readonly trailer: PdfDict;
   readonly diagnostics: Diagnostic[] = [];
 
-  // 객체 캐시. key = `${num}_${gen}`. compressed object는 stream 단위로 한 번에 로드.
-  private cache = new Map<string, PdfObject>();
+  // 객체 캐시 (LRU). key = `${num}_${gen}`. 큰 PDF에서 메모리 폭주 방지.
+  private cache = new LRUCache<string, PdfObject>(4096);
   // 신규/수정된 객체. 직렬화 시 사용.
   readonly dirty = new Map<number, { gen: number; obj: PdfObject }>();
   // 다음 객체 번호 (할당용).
