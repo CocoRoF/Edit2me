@@ -17,6 +17,7 @@ import { decodeStream } from '../core/stream';
 import { PdfDocument } from '../parser/document';
 import { CORE_14, isCore14, CoreFontMetrics } from './core14';
 import { parseToUnicodeCMap } from './cmap';
+import { CidMapLookup, getCidLookup } from './cid-mappings';
 
 export interface FontInfo {
   resourceName: string;
@@ -110,7 +111,9 @@ export function buildFontInfo(
     }
   }
 
-  // Composite 폰트의 W array
+  // Composite 폰트의 W array + CIDSystemInfo
+  let cidLookup: CidMapLookup | null = null;
+  let cidSystemInfo: { registry: string; ordering: string } | null = null;
   if (isComposite) {
     const descendants = dictGet(fontDict, 'DescendantFonts');
     if (descendants && isArray(descendants)) {
@@ -122,6 +125,35 @@ export function buildFontInfo(
           if (w && isArray(w)) parseCIDWidths(w, doc, widthMap);
           const dw = asNumber(dictGet(cidFont, 'DW'));
           if (dw !== undefined) defaultWidth = dw;
+          // CIDSystemInfo 추출 → CID 매핑 lookup
+          const cidSysObj = dictGet(cidFont, 'CIDSystemInfo');
+          if (cidSysObj) {
+            const cidSys = doc.resolve(cidSysObj);
+            if (isDict(cidSys)) {
+              const reg = doc.resolve(dictGet(cidSys, 'Registry') ?? { kind: 'null' });
+              const ord = doc.resolve(dictGet(cidSys, 'Ordering') ?? { kind: 'null' });
+              const regStr = isString(reg)
+                ? new TextDecoder('latin1').decode(reg.bytes)
+                : isName(reg)
+                  ? reg.value
+                  : '';
+              const ordStr = isString(ord)
+                ? new TextDecoder('latin1').decode(ord.bytes)
+                : isName(ord)
+                  ? ord.value
+                  : '';
+              if (regStr && ordStr) {
+                cidSystemInfo = { registry: regStr, ordering: ordStr };
+                cidLookup = getCidLookup(regStr, ordStr);
+                if (!cidLookup && !toUni) {
+                  warnings.push(
+                    `No bundled CID mapping for ${regStr}-${ordStr}. ` +
+                      'Run `npm run build:cmaps` to fetch Adobe CMap data, or rely on PDF\'s own ToUnicode.',
+                  );
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -155,7 +187,12 @@ export function buildFontInfo(
       if (u !== undefined) return u;
     }
     if (isComposite) {
-      // CID. 매핑 없음. ASCII로 *절대* fallback하지 않음 (A1 버그 회피).
+      // CID. ToUnicode 가 없거나 누락된 entry → bundled CID map (Adobe-Korea1 등) 시도.
+      if (cidLookup) {
+        const u = cidLookup(code);
+        if (u !== null) return u;
+      }
+      // ASCII로 *절대* fallback하지 않음 (A1 버그 회피).
       return null;
     }
     // 단순 폰트: 코어14 또는 표준 인코딩 fallback
@@ -172,9 +209,9 @@ export function buildFontInfo(
     return null;
   }
 
-  if (isComposite && !toUni) {
+  if (isComposite && !toUni && !cidLookup) {
     warnings.push(
-      'Composite font without ToUnicode CMap — text on this font cannot be decoded',
+      'Composite font without ToUnicode CMap and no bundled CID mapping — text cannot be decoded',
     );
   }
 
@@ -194,7 +231,10 @@ export function buildFontInfo(
     descent: coreMetrics?.descent ?? -200,
     dict: fontDict,
     warnings,
-    hasUnicodeMap: toUni !== undefined || (!isComposite && (isCore || encoding !== undefined)),
+    hasUnicodeMap:
+      toUni !== undefined ||
+      (isComposite && cidLookup !== null) ||
+      (!isComposite && (isCore || encoding !== undefined)),
   };
 }
 
