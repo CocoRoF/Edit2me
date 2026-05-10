@@ -168,30 +168,41 @@ components/
 
 자동 테스트는 v0.2에서 도입.
 
-## 5. v0.2 진행 상황 (PR #1–9 종료 시점)
+## 5. 진행 상황 (PR #1–18 종료 시점)
 
-세부 변경은 [`docs/14-v0.2-changelog.md`](./14-v0.2-changelog.md). 본 audit 의 항목별 진행 상태:
+세부 변경: [`docs/14-v0.2-changelog.md`](./14-v0.2-changelog.md) (PR #1–9), [`docs/15-v0.3-changelog.md`](./15-v0.3-changelog.md) (PR #10–18).
 
 ### 처리 완료
-- ✅ A4 (인프라) — Adobe CID→Unicode infrastructure (PR #1). 표준 CMap 데이터 fetch 스크립트 포함.
-- ✅ A9 — Edit-text 후 TJ advance 보정 (PR #2)
-- ✅ B7 — IntersectionObserver 기반 페이지 가상화 (PR #4)
+- ✅ A1 — Type0 ASCII fallback 버그 (v0.1)
+- ✅ A2 — CMap 파서 robust (v0.1, +회귀 테스트)
+- ✅ A3 — 가변 byte 길이 디코딩 (v0.1)
+- ✅ A4 — Adobe CID→Unicode 인프라 (PR #1) + **호스트 빌드시 자동 fetch (PR #15)**
+- ✅ A5 — pageContent byte 캐시 (v0.1)
+- ✅ A6 — 페이지 텍스트 추출 캐시 (v0.1)
+- ✅ A8 — vertical writing mode (PR #10)
+- ✅ A9 — Edit-text TJ advance 보정 (PR #2)
+- ✅ A10 — Tz horizontal scaling (v0.1)
+- ✅ A11 — always-on document diagnostics (PR #11)
+- ✅ B1–B6, B8–B10 — UI 전면 재설계 (v0.1)
+- ✅ B7 — 페이지 가상화 (PR #4)
 - ✅ B11 — 키보드 단축키 모달 (PR #5)
 - ✅ B12 — 진단 패널 (PR #5)
 - ✅ B13 — 모바일 반응형 (PR #6)
+- ✅ C1–C4 — 캐싱 + batch endpoint (v0.1)
+- ✅ C5 — surgical update (PR #12)
 - ✅ C6 — LRU 객체 캐시 (PR #2)
 - ✅ D1 — Undo/Redo (PR #3)
-- ✅ E3 — 단위 테스트 (PR #8)
-- ✅ i18n — ko/en (PR #7) — 새 항목
+- ✅ D2 — 진단 배너 (v0.1)
+- ✅ **D3 — 사용자 TTF 업로드 + 한글 add-text (PR #16, #17)**
+- ✅ D4 — 회전 페이지 add-text 좌표 보정 (PR #13)
+- ✅ E1 — API 경계 op-validate (PR #14)
+- ✅ E2 — 클라이언트 fetch 캐시 (PR #14)
+- ✅ E3 — vitest + 44 단위 테스트 (PR #8 + 후속)
+- ✅ i18n ko/en (PR #7)
 
-### 보류 / v0.3 후보
-- A4 잔여: `build:cmaps` 의 호스트 자동 실행
-- A7 — content stream 파서 최적화 (선 측정)
-- A8 — vertical writing mode
-- A11 — 진단 시스템 항상 채우기 (정상 케이스도 정보 진단 추가)
-- C5 — surgical update (response → 클라이언트 부분 갱신)
-- D3 — 사용자 TTF subset embedding (한글 텍스트 추가)
-- D4 — 회전 페이지에서 add-text 좌표 보정
-- E1 — `as` 단언 축소 + 입력 validation (zod)
-- E2 — 클라이언트 fetch 캐시 (SWR-like)
-- 자체 raster renderer ([`05-renderer.md`](./05-renderer.md) Phase 2~3)
+### 보류 (의식적)
+- 자체 raster renderer — [ADR-0004](./adr/0004-raster-renderer-deferred.md) 로 명시 보류
+- A7 — content stream 최적화: 측정 결과 임계 미달, 우선순위 낮음
+- F8 — 주석/하이라이트 추가 (v0.4 backlog)
+- F12 — 디지털 서명 보존 *검증* (보존 자체는 incremental update가 자동)
+- OCR (스캔 PDF) — 별도 큰 사이클
