@@ -104,7 +104,29 @@ export class PdfDocument {
       throw e;
     }
 
-    return new PdfDocument(buf, version, xref);
+    const doc = new PdfDocument(buf, version, xref);
+
+    // ---- 문서 레벨 진단 (정상 케이스에도 정보 채움 — A11) ----
+    doc.diagnostics.push({
+      level: 'info',
+      code: 'pdf-version',
+      message: `PDF version ${version}`,
+    });
+    if (headerOffset > 0) {
+      doc.diagnostics.push({
+        level: 'warn',
+        code: 'header-offset',
+        message: `PDF header found at offset ${headerOffset} (file has ${headerOffset} bytes of leading garbage)`,
+      });
+    }
+    if (xref.startxrefOffsets.length > 1) {
+      doc.diagnostics.push({
+        level: 'info',
+        code: 'incremental-history',
+        message: `${xref.startxrefOffsets.length} xref sections — file has ${xref.startxrefOffsets.length - 1} prior incremental update(s)`,
+      });
+    }
+    return doc;
   }
 
   // ---- 객체 resolve ----

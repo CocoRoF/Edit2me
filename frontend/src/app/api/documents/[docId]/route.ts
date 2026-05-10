@@ -22,6 +22,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ docId: str
     name: entry.name,
     pageCount: pages.length,
     version: doc.version,
+    diagnostics: doc.diagnostics,
     pages,
     revision: entry.revision,
     ...entryUndoState(entry),

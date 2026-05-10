@@ -334,7 +334,10 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
         canRedo={canRedo}
         onUndo={handleUndo}
         onRedo={handleRedo}
-        diagnosticCount={diagnostics.length}
+        diagnosticCount={
+          diagnostics.length +
+          (meta.diagnostics?.filter((d) => d.level !== 'info').length ?? 0)
+        }
         onOpenDiagnostics={() => setDiagnosticOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
         onToggleSidebar={() => setMobileSidebarOpen((o) => !o)}
@@ -423,6 +426,7 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
         open={diagnosticOpen}
         onClose={() => setDiagnosticOpen(false)}
         pageTexts={pageTexts}
+        docDiagnostics={meta.diagnostics ?? []}
       />
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </main>

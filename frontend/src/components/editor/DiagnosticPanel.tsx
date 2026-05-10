@@ -1,15 +1,22 @@
 'use client';
 
-import { X, AlertTriangle, FileText } from 'lucide-react';
+import { X, AlertTriangle, FileText, Info, AlertCircle } from 'lucide-react';
 import type { PageText } from '@/lib/api';
+
+interface DocDiagnostic {
+  level: 'info' | 'warn' | 'error';
+  code: string;
+  message: string;
+}
 
 interface Props {
   open: boolean;
   onClose: () => void;
   pageTexts: Map<number, PageText>;
+  docDiagnostics?: DocDiagnostic[];
 }
 
-export function DiagnosticPanel({ open, onClose, pageTexts }: Props) {
+export function DiagnosticPanel({ open, onClose, pageTexts, docDiagnostics = [] }: Props) {
   if (!open) return null;
 
   // 페이지별 폰트 warning 모으기
@@ -66,7 +73,42 @@ export function DiagnosticPanel({ open, onClose, pageTexts }: Props) {
           </button>
         </header>
         <div className="flex-1 overflow-y-auto thin-scroll p-4 space-y-4">
-          {grouped.size === 0 && (
+          {/* 문서 레벨 진단 */}
+          {docDiagnostics.length > 0 && (
+            <div>
+              <h3 className="text-[11px] uppercase tracking-wider text-[color:var(--color-muted)] mb-2">
+                문서
+              </h3>
+              <ul className="space-y-1.5">
+                {docDiagnostics.map((d, i) => {
+                  const Icon = d.level === 'error' ? AlertCircle : d.level === 'warn' ? AlertTriangle : Info;
+                  const color =
+                    d.level === 'error'
+                      ? 'text-[color:var(--color-danger)]'
+                      : d.level === 'warn'
+                        ? 'text-[color:var(--color-warn)]'
+                        : 'text-[color:var(--color-accent)]';
+                  return (
+                    <li key={i} className="flex items-start gap-2 text-xs">
+                      <Icon size={12} className={`mt-0.5 shrink-0 ${color}`} />
+                      <span>
+                        <code className="text-[10px] text-[color:var(--color-muted)]">{d.code}</code>{' '}
+                        {d.message}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {grouped.size > 0 && (
+            <h3 className="text-[11px] uppercase tracking-wider text-[color:var(--color-muted)]">
+              폰트
+            </h3>
+          )}
+
+          {grouped.size === 0 && docDiagnostics.length === 0 && (
             <p className="text-sm text-[color:var(--color-muted)]">
               감지된 진단이 없습니다. 모든 폰트가 정상적으로 디코드됐어요.
             </p>
