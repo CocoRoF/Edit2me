@@ -32,6 +32,8 @@ export interface OpResult {
   newPageCount: number;
   canUndo: boolean;
   canRedo: boolean;
+  /** C5 — surgical update: 클라이언트가 전체 doc 메타 재요청 안 해도 됨. */
+  pages: PageMeta[];
 }
 
 export interface TextBlock {

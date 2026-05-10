@@ -169,21 +169,39 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, meta, addTextMode, canUndo, canRedo]);
 
+  // 공통: op 응답에서 surgical update — getDocument 추가 호출 안 함.
+  const applyOpResult = useCallback(
+    (res: { revision: number; pages: typeof meta extends null ? never : DocumentMeta['pages']; canUndo: boolean; canRedo: boolean; newPageCount: number }) => {
+      setMeta((cur) =>
+        cur
+          ? {
+              ...cur,
+              revision: res.revision,
+              pages: res.pages,
+              pageCount: res.newPageCount,
+              canUndo: res.canUndo,
+              canRedo: res.canRedo,
+            }
+          : cur,
+      );
+      setCanUndo(res.canUndo);
+      setCanRedo(res.canRedo);
+      setReload((x) => x + 1);
+      if (res.newPageCount > 0 && activeIndex >= res.newPageCount) {
+        setActive(res.newPageCount - 1);
+      }
+      setSelected(new Set());
+    },
+    [activeIndex],
+  );
+
   const runOps = useCallback(
     async (ops: Op[]) => {
       if (!meta) return;
       try {
         const res = await apiApplyOps(docId, meta.revision, ops);
-        const fresh = await getDocument(docId);
-        setMeta(fresh);
-        setCanUndo(res.canUndo);
-        setCanRedo(res.canRedo);
-        setReload((x) => x + 1);
+        applyOpResult(res);
         setModified(true);
-        if (fresh.pageCount > 0 && activeIndex >= fresh.pageCount) {
-          setActive(fresh.pageCount - 1);
-        }
-        setSelected(new Set());
         if (
           ops.some(
             (o) => o.op === 'delete-pages' || o.op === 'reorder-pages' || o.op === 'rotate-pages',
@@ -199,43 +217,30 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
         return null;
       }
     },
-    [docId, meta, activeIndex, reloadAffected, reloadAllText, toast],
+    [docId, meta, applyOpResult, reloadAffected, reloadAllText, toast],
   );
 
   const handleUndo = useCallback(async () => {
     try {
       const res = await undoOp(docId);
-      const fresh = await getDocument(docId);
-      setMeta(fresh);
-      setCanUndo(res.canUndo);
-      setCanRedo(res.canRedo);
-      setReload((x) => x + 1);
-      setModified(res.canUndo); // history가 남아 있으면 여전히 수정 상태
-      if (fresh.pageCount > 0 && activeIndex >= fresh.pageCount) {
-        setActive(fresh.pageCount - 1);
-      }
-      setSelected(new Set());
+      applyOpResult(res);
+      setModified(res.canUndo);
       await reloadAllText();
     } catch (e) {
       toast.error((e as Error).message);
     }
-  }, [docId, activeIndex, reloadAllText, toast]);
+  }, [docId, applyOpResult, reloadAllText, toast]);
 
   const handleRedo = useCallback(async () => {
     try {
       const res = await redoOp(docId);
-      const fresh = await getDocument(docId);
-      setMeta(fresh);
-      setCanUndo(res.canUndo);
-      setCanRedo(res.canRedo);
-      setReload((x) => x + 1);
+      applyOpResult(res);
       setModified(true);
-      setSelected(new Set());
       await reloadAllText();
     } catch (e) {
       toast.error((e as Error).message);
     }
-  }, [docId, reloadAllText, toast]);
+  }, [docId, applyOpResult, reloadAllText, toast]);
 
   const handleSelect = useCallback(
     (i: number, mode: 'single' | 'toggle' | 'range') => {
