@@ -44,7 +44,11 @@ export function PageView({
   return (
     <div
       ref={ref}
-      className="relative paper"
+      // shrink-0: 부모가 flex-col 이라 default flex-shrink:1 이면 모든 페이지 합산 높이가
+      // 부모보다 클 때 균등 축소되어 zoom 을 키워도 height 가 거의 안 자라는 증상이 생김
+      // (예: z=2.5 에서 4 페이지 × 2105px = 8420px > 부모 ≈ 1100px → 각 ~275px 로 짜부됨).
+      // overflow-auto 가 부모에 있어도 shrink 가 먼저 적용됨. 명시적으로 0 으로 막는다.
+      className="relative paper shrink-0"
       style={{
         width: w,
         height: h,
