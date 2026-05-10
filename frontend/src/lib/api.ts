@@ -139,8 +139,10 @@ export async function getPageTextBatch(
   return (await res.json()) as { pages: PageText[]; revision: number };
 }
 
-export function thumbUrl(docId: string, idx: number, w = 200): string {
-  return apiUrl(`/api/documents/${docId}/pages/${idx}/thumb?w=${w}`);
+// revision 쿼리 — 페이지 reorder/rotate/delete 후 같은 idx 의 thumb 이 바뀌므로,
+// 브라우저가 stale cache 를 쓰지 않도록 cache buster.
+export function thumbUrl(docId: string, idx: number, w = 200, revision = 0): string {
+  return apiUrl(`/api/documents/${docId}/pages/${idx}/thumb?w=${w}&r=${revision}`);
 }
 
 export function svgUrl(docId: string, idx: number, revision = 0): string {

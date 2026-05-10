@@ -16,6 +16,8 @@ interface BaseProps {
   onDelete: (indices: number[]) => void;
   onRotate: (indices: number[], angle: 90 | -90) => void;
   reload?: number;
+  /** 현재 문서 revision — thumb URL cache 무효화에 사용 */
+  revision?: number;
 }
 
 interface Props extends BaseProps {
@@ -71,7 +73,9 @@ export function Sidebar(props: Props) {
 
   return (
     <aside
-      className="hidden md:flex w-44 shrink-0 flex-col border-r"
+      // w-44 (176px) 는 thumbnail + 페이지 번호 + selection action 들이 좁게 느껴짐
+      // → w-64 (256px) 로 확장. icon 들도 자연스럽게 펼쳐짐.
+      className="hidden md:flex w-64 shrink-0 flex-col border-r"
       style={{ background: 'var(--color-surface)', borderColor: 'var(--color-line)' }}
     >
       <SidebarBody {...base} />
@@ -91,6 +95,7 @@ function SidebarBody(props: BaseProps) {
     onDelete,
     onRotate,
     reload,
+    revision,
   } = props;
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
@@ -168,7 +173,9 @@ function SidebarBody(props: BaseProps) {
                 }}
               >
                 <img
-                  src={thumbUrl(docId, i, 160)}
+                  // revision 을 query 로 넣어 reorder/rotate/delete 직후 같은 슬롯의
+                  // thumb 이 stale cache 로 보이는 문제 해결.
+                  src={thumbUrl(docId, i, 220, revision ?? 0)}
                   alt={`page ${i + 1}`}
                   className="w-full h-auto block rounded-sm"
                   draggable={false}

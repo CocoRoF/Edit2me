@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  Plus, Download, Loader2, FileText, Minus, ZoomIn, Undo2, Redo2,
+  Type, Download, Loader2, FileText, Minus, Plus, Undo2, Redo2,
   HelpCircle, AlertTriangle, Menu,
 } from 'lucide-react';
 import { Kbd } from '@/components/ui/Kbd';
@@ -94,67 +94,63 @@ export function Toolbar({
 
       <div className="flex-1" />
 
-      <div className="flex items-stretch gap-0.5">
-        <button
-          onClick={onUndo}
-          disabled={!canUndo}
-          className="btn btn-ghost btn-icon"
-          title="실행 취소 (⌘Z)"
-        >
+      {/* 모든 ghost 액션은 동일 사이즈 (.tb-icon = 36×36) 의 정사각 ghost icon button.
+          그룹 사이는 얇은 vertical divider 로 시각 구분. Download 만 primary CTA. */}
+      <div className="flex items-center gap-0.5">
+        <ToolbarIcon onClick={onUndo} disabled={!canUndo} title="실행 취소 (⌘Z)">
           <Undo2 size={16} />
-        </button>
-        <button
-          onClick={onRedo}
-          disabled={!canRedo}
-          className="btn btn-ghost btn-icon"
-          title="다시 실행 (⌘⇧Z)"
-        >
+        </ToolbarIcon>
+        <ToolbarIcon onClick={onRedo} disabled={!canRedo} title="다시 실행 (⌘⇧Z)">
           <Redo2 size={16} />
-        </button>
+        </ToolbarIcon>
       </div>
 
-      <button
-        onClick={toggleAddText}
-        className={addTextMode ? 'btn btn-primary' : 'btn'}
-        title={t('editor.addText')}
-      >
-        <Plus size={16} />
-        <span className="hidden sm:inline">{t('editor.addText')}</span>
-        <span className="hidden md:inline"><Kbd>T</Kbd></span>
-      </button>
+      <ToolbarDivider />
 
-      <div
-        className="hidden sm:flex items-stretch border rounded overflow-hidden"
-        style={{ borderColor: 'var(--color-line)' }}
+      <ToolbarIcon
+        onClick={toggleAddText}
+        active={addTextMode}
+        title={`${t('editor.addText')} (T)`}
       >
+        <Type size={16} />
+      </ToolbarIcon>
+
+      <ToolbarDivider />
+
+      {/* Zoom segmented control — height/border-radius 를 ghost icon 과 맞춤 */}
+      <div className="hidden sm:flex items-center h-9 rounded-md border overflow-hidden"
+        style={{ borderColor: 'var(--color-line)' }}>
         <button
-          className="px-2 hover:bg-[color:var(--color-surface-2)]"
           onClick={() => setZoom(Math.max(0.25, zoom - 0.1))}
+          className="h-full px-2 inline-flex items-center hover:bg-[color:var(--color-surface-2)] text-[color:var(--color-muted)]"
           aria-label="Zoom out"
         >
           <Minus size={14} />
         </button>
         <button
           onClick={resetZoom}
-          className="px-2 text-xs w-14 text-center hover:bg-[color:var(--color-surface-2)]"
+          className="h-full px-2 text-xs w-14 inline-flex items-center justify-center hover:bg-[color:var(--color-surface-2)] border-x"
+          style={{ borderColor: 'var(--color-line)' }}
           title="100% 로 (⌘0)"
         >
           {Math.round(zoom * 100)}%
         </button>
         <button
-          className="px-2 hover:bg-[color:var(--color-surface-2)]"
           onClick={() => setZoom(Math.min(3, zoom + 0.1))}
+          className="h-full px-2 inline-flex items-center hover:bg-[color:var(--color-surface-2)] text-[color:var(--color-muted)]"
           aria-label="Zoom in"
         >
-          <ZoomIn size={14} />
+          <Plus size={14} />
         </button>
       </div>
 
+      <ToolbarDivider />
+
       {diagnosticCount > 0 && (
-        <button
+        <ToolbarIcon
           onClick={onOpenDiagnostics}
-          className="btn btn-ghost btn-icon relative"
           title={`${diagnosticCount}개의 진단`}
+          className="relative"
         >
           <AlertTriangle size={16} className="text-[color:var(--color-warn)]" />
           <span
@@ -163,26 +159,66 @@ export function Toolbar({
           >
             {diagnosticCount}
           </span>
-        </button>
+        </ToolbarIcon>
       )}
 
-      <button
-        onClick={onOpenHelp}
-        className="hidden sm:inline-flex btn btn-ghost btn-icon"
-        title={t('editor.help')}
-      >
+      <ToolbarIcon onClick={onOpenHelp} title={t('editor.help')} className="hidden sm:inline-flex">
         <HelpCircle size={16} />
-      </button>
+      </ToolbarIcon>
 
       <span className="hidden md:inline-flex">
         <LocaleToggle />
       </span>
 
-      <button onClick={onDownload} disabled={downloading} className="btn btn-primary">
+      <button onClick={onDownload} disabled={downloading} className="btn btn-primary h-9">
         {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
         <span className="hidden sm:inline">{t('editor.download')}</span>
         <span className="hidden md:inline"><Kbd>⌘S</Kbd></span>
       </button>
     </header>
   );
+}
+
+// 36×36 정사각 ghost icon button — toolbar 의 모든 단순 액션 통일.
+// active=true 면 accent 배경/색상으로 토글 상태 표시.
+function ToolbarIcon({
+  children, onClick, disabled, title, active, className = '',
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  title: string;
+  active?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`h-9 w-9 inline-flex items-center justify-center rounded-md transition-colors ${className}`}
+      style={{
+        background: active ? 'var(--color-accent-soft)' : 'transparent',
+        color: active ? 'var(--color-accent)' : 'var(--color-muted)',
+        opacity: disabled ? 0.4 : 1,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+      }}
+      onMouseEnter={(e) => {
+        if (disabled || active) return;
+        (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-surface-2)';
+        (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-ink)';
+      }}
+      onMouseLeave={(e) => {
+        if (disabled || active) return;
+        (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+        (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-muted)';
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ToolbarDivider() {
+  return <span className="hidden sm:inline-block w-px h-5 mx-1" style={{ background: 'var(--color-line)' }} />;
 }

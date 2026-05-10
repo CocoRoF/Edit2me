@@ -56,6 +56,7 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
   const [diagnosticOpen, setDiagnosticOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
 
   // 초기 로드 + 모든 페이지 텍스트 batch 로드
   useEffect(() => {
@@ -118,6 +119,27 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
       // ignore
     }
   }, [docId]);
+
+  // Ctrl/Cmd + wheel 로 zoom — 브라우저 기본 (페이지 zoom) 을 가로채야 하므로
+  // React 의 onWheel (passive) 대신 native addEventListener({passive: false}) 사용.
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      // deltaY > 0 = 휠 아래로 = zoom out, < 0 = zoom in. 고정 step 0.1, [0.25, 3] clamp.
+      // line-mode (deltaMode === 1) wheel 은 더 큰 step 을 보내므로 보정.
+      const lineNorm = e.deltaMode === 1 ? 16 : 1;
+      const step = -Math.sign(e.deltaY) * 0.1 * (Math.abs(e.deltaY * lineNorm) > 50 ? 1.5 : 1);
+      setZoom((z) => {
+        const next = Math.min(3, Math.max(0.25, z + step));
+        return Math.round(next * 100) / 100;
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [meta]);
 
   // 키보드 단축키
   useEffect(() => {
@@ -381,6 +403,7 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
           onDelete={handleDelete}
           onRotate={handleRotate}
           reload={reload}
+          revision={meta.revision}
         />
         <Sidebar
           docId={docId}
@@ -393,9 +416,11 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
           onDelete={handleDelete}
           onRotate={handleRotate}
           reload={reload}
+          revision={meta.revision}
           mobile={{ open: mobileSidebarOpen, onClose: () => setMobileSidebarOpen(false) }}
         />
         <div
+          ref={canvasRef}
           className="flex-1 overflow-auto thin-scroll flex flex-col items-center px-8 py-8 gap-6"
           style={{ background: 'var(--color-canvas)' }}
         >
