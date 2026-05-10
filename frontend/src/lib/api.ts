@@ -65,6 +65,8 @@ export interface PageText {
   rotate: 0 | 90 | 180 | 270;
   blocks: TextBlock[];
   fontWarnings: FontWarning[];
+  /** 이 페이지에 이미 등장한 글자들 — subset 폰트 환경에서 편집에 사용 가능한 글자 set. */
+  availableChars: string;
 }
 
 // ---- 클라이언트 in-memory cache (E2) ----

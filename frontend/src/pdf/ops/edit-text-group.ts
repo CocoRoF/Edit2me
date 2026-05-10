@@ -73,8 +73,11 @@ export function editTextGroup(doc: PdfDocument, spec: EditTextGroupSpec): void {
   }
   const enc = font.encodeText(spec.newText);
   if (!enc || enc.missing.length > 0) {
+    const ms = enc?.missing ?? [];
+    const sample = ms.slice(0, 5).join(', ');
     throw new EditTextError(
-      `Font is missing glyph(s) for: ${enc?.missing.slice(0, 5).join(', ') ?? 'unknown'}`,
+      `이 PDF 폰트에 없는 글자: ${sample}${ms.length > 5 ? ` 외 ${ms.length - 5}개` : ''}. ` +
+        `편집 toolbar 의 💡 hint 에서 사용 가능한 글자 set 을 확인하세요.`,
       'glyph-missing',
     );
   }
