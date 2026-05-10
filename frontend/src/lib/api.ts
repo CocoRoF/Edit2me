@@ -193,6 +193,32 @@ export async function finalizeDoc(
   return await res.json();
 }
 
+export interface UploadedFontMeta {
+  uploadId: string;
+  displayName: string;
+}
+
+export async function listFonts(docId: string): Promise<UploadedFontMeta[]> {
+  const res = await fetch(apiUrl(`/api/documents/${docId}/fonts`));
+  if (!res.ok) return [];
+  const data = (await res.json()) as { fonts: UploadedFontMeta[] };
+  return data.fonts;
+}
+
+export async function uploadFont(docId: string, file: File): Promise<UploadedFontMeta> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(apiUrl(`/api/documents/${docId}/fonts`), {
+    method: 'POST',
+    body: fd,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Font upload failed (${res.status})`);
+  }
+  return (await res.json()) as UploadedFontMeta;
+}
+
 export async function mergeDocs(
   sources: Array<{ docId: string }>,
   pages: Array<{ source: number; pageIndex: number; rotation?: 0 | 90 | 180 | 270 }>,

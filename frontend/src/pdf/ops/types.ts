@@ -11,15 +11,30 @@ export interface ReorderPagesOp {
   permutation: number[]; // 새 인덱스 → 기존 인덱스
 }
 
+export type CoreFontName =
+  | 'Helvetica'
+  | 'Helvetica-Bold'
+  | 'Helvetica-Oblique'
+  | 'Helvetica-BoldOblique'
+  | 'Times-Roman'
+  | 'Times-Bold'
+  | 'Times-Italic'
+  | 'Times-BoldItalic'
+  | 'Courier'
+  | 'Courier-Bold'
+  | 'Courier-Oblique'
+  | 'Courier-BoldOblique';
+
 export interface AddTextOp {
   op: 'add-text';
   pageIndex: number;
-  x: number; // PDF 좌표 (좌하 원점)
+  x: number;
   y: number;
   text: string;
-  font: 'Helvetica' | 'Helvetica-Bold' | 'Helvetica-Oblique' | 'Times-Roman' | 'Times-Bold' | 'Times-Italic' | 'Courier' | 'Courier-Bold';
+  /** Core 14 폰트 이름 또는 업로드된 TTF 의 fontId. */
+  font: CoreFontName | { kind: 'ttf'; uploadId: string };
   fontSize: number;
-  color: { r: number; g: number; b: number }; // 0..1
+  color: { r: number; g: number; b: number };
 }
 
 export interface EditTextOp {

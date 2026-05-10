@@ -74,8 +74,18 @@ function validateOne(v: unknown): { ok: boolean; error?: string; op?: Op } {
       if (typeof o.text !== 'string' || o.text.length === 0)
         return { ok: false, error: 'text required' };
       if (o.text.length > 10_000) return { ok: false, error: 'text too long (max 10000)' };
-      if (typeof o.font !== 'string' || !ALLOWED_FONTS.has(o.font))
-        return { ok: false, error: `font must be one of: ${[...ALLOWED_FONTS].join(', ')}` };
+      // font 는 코어 14 이름(string) 또는 { kind: 'ttf', uploadId: string }
+      let validFont = false;
+      if (typeof o.font === 'string' && ALLOWED_FONTS.has(o.font)) validFont = true;
+      else if (
+        o.font &&
+        typeof o.font === 'object' &&
+        (o.font as { kind?: unknown }).kind === 'ttf' &&
+        typeof (o.font as { uploadId?: unknown }).uploadId === 'string'
+      )
+        validFont = true;
+      if (!validFont)
+        return { ok: false, error: `font must be a Core 14 name or { kind: "ttf", uploadId }` };
       if (typeof o.fontSize !== 'number' || o.fontSize <= 0 || o.fontSize > 144)
         return { ok: false, error: 'fontSize must be 0..144' };
       const c = o.color as { r?: unknown; g?: unknown; b?: unknown } | undefined;
@@ -97,7 +107,7 @@ function validateOne(v: unknown): { ok: boolean; error?: string; op?: Op } {
           text: o.text,
           font: o.font as Extract<Op, { op: 'add-text' }>['font'],
           fontSize: o.fontSize,
-          color: { r: c.r, g: c.g, b: c.b },
+          color: { r: c.r as number, g: c.g as number, b: c.b as number },
         },
       };
     }
