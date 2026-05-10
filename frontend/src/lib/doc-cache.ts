@@ -8,7 +8,15 @@ import { PdfDocument } from '@/pdf/parser/document';
 import { Op } from '@/pdf/ops/types';
 import { applyOps } from '@/pdf/ops/apply';
 import { extractTextFromPage, TextExtractionResult } from '@/pdf/graphics/text-extract';
+import { ParsedTtf, parseTtf } from '@/pdf/fonts/ttf-parser';
 import { getUpload, putUpload, deleteDoc } from '@/pdf/store/minio';
+
+export interface UploadedFont {
+  parsed: ParsedTtf;
+  baseName: string;
+  /** 사용자에게 보여줄 라벨 */
+  displayName: string;
+}
 
 interface DocEntry {
   doc: PdfDocument;
@@ -23,6 +31,8 @@ interface DocEntry {
   textCache: Map<number, TextExtractionResult>;
   /** 원본 PDF byte (undo 시 처음부터 op replay 위해). */
   originalBytes: Uint8Array;
+  /** 이 doc 에 업로드된 TTF (uploadId → font). */
+  uploadedFonts: Map<string, UploadedFont>;
 }
 
 const cache = new Map<string, DocEntry>();
@@ -49,6 +59,7 @@ export async function registerNewDoc(
     redoStack: [],
     textCache: new Map(),
     originalBytes: buf,
+    uploadedFonts: new Map(),
   };
   cache.set(docId, entry);
   evictIfNeeded();
@@ -77,6 +88,7 @@ export async function getDoc(docId: string): Promise<DocEntry | null> {
     redoStack: [],
     textCache: new Map(),
     originalBytes: buf,
+    uploadedFonts: new Map(),
   };
   cache.set(docId, entry);
   evictIfNeeded();
@@ -116,7 +128,7 @@ function snapshotPages(entry: DocEntry): OpResult['pages'] {
 export async function applyOpsToDoc(docId: string, ops: Op[]): Promise<OpResult | null> {
   const entry = await getDoc(docId);
   if (!entry) return null;
-  const result = applyOps(entry.doc, ops);
+  const result = applyOps(entry.doc, ops, { uploadedFonts: entry.uploadedFonts });
   entry.history.push(...ops);
   entry.redoStack = [];
   entry.revision += 1;
@@ -158,7 +170,7 @@ export async function undoDoc(docId: string): Promise<OpResult | null> {
   entry.redoStack.push(op);
   entry.doc = PdfDocument.open(entry.originalBytes);
   if (entry.history.length > 0) {
-    applyOps(entry.doc, [...entry.history]);
+    applyOps(entry.doc, [...entry.history], { uploadedFonts: entry.uploadedFonts });
   }
   entry.revision += 1;
   entry.textCache.clear();
@@ -188,7 +200,7 @@ export async function redoDoc(docId: string): Promise<OpResult | null> {
     };
   }
   const op = entry.redoStack.pop()!;
-  applyOps(entry.doc, [op]);
+  applyOps(entry.doc, [op], { uploadedFonts: entry.uploadedFonts });
   entry.history.push(op);
   entry.revision += 1;
   entry.textCache.clear();
@@ -210,6 +222,35 @@ export function entryUndoState(entry: DocEntry): { canUndo: boolean; canRedo: bo
     canUndo: entry.history.length > 0,
     canRedo: entry.redoStack.length > 0,
   };
+}
+
+/** TTF 업로드 → 파싱 → entry.uploadedFonts 에 등록. uploadId 반환. */
+export async function uploadFont(
+  docId: string,
+  ttfBytes: Uint8Array,
+  displayName: string,
+): Promise<{ uploadId: string; sample: { glyphs: number; unicodeMappings: number } } | null> {
+  const entry = await getDoc(docId);
+  if (!entry) return null;
+  const parsed = parseTtf(ttfBytes);
+  const uploadId = crypto.randomBytes(8).toString('base64url');
+  // BaseFont 이름 — Unicode 안전한 ASCII 식별자만 (Adobe FontName 규칙)
+  const sanitized = (displayName.replace(/[^A-Za-z0-9_-]/g, '') || 'UserFont').slice(0, 32);
+  const baseName = `Edit2me${uploadId}+${sanitized}`;
+  entry.uploadedFonts.set(uploadId, { parsed, baseName, displayName });
+  return {
+    uploadId,
+    sample: { glyphs: parsed.numGlyphs, unicodeMappings: parsed.unicodeToGid.size },
+  };
+}
+
+export function listUploadedFonts(
+  entry: DocEntry,
+): Array<{ uploadId: string; displayName: string }> {
+  return [...entry.uploadedFonts.entries()].map(([uploadId, f]) => ({
+    uploadId,
+    displayName: f.displayName,
+  }));
 }
 
 /** 페이지 텍스트 (캐시 우선) */
@@ -245,6 +286,7 @@ export async function rebaseDoc(
     redoStack: [],
     textCache: new Map(),
     originalBytes: bytes,
+    uploadedFonts: new Map(),
   };
   cache.set(docId, entry);
 }

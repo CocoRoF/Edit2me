@@ -420,6 +420,7 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
 
       {addTextAt && (
         <AddTextDialog
+          docId={docId}
           pageIndex={addTextAt.pageIndex}
           x={addTextAt.x}
           y={addTextAt.y}

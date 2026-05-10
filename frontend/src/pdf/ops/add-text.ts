@@ -1,17 +1,15 @@
 // 페이지에 새 텍스트 추가.
 //
-// 정책:
-// - 폰트는 코어14 (임베딩 없음). PDF 자원 dict에 등록.
-// - 콘텐츠 stream을 *배열*로 만들고 새 fragment를 push (원본 손대지 않음).
+// 두 가지 폰트 경로:
+//   - Core 14 (Helvetica 등): 임베딩 없음. WinAnsi 인코딩 (ASCII 한정).
+//   - 업로드된 TTF: Type0 + CIDFontType2 + Identity-H (한글/CJK 가능).
 
 import zlib from 'node:zlib';
 import {
   PdfArray,
   PdfDict,
-  PdfObject,
   PdfRef,
   PdfStream,
-  asNumber,
   cloneObject,
   dictGet,
   dictSet,
@@ -23,19 +21,23 @@ import {
   pdfDict,
   pdfInt,
   pdfName,
-  pdfRef,
   pdfStream,
 } from '../core/object';
 import { PdfDocument } from '../parser/document';
+import { ParsedTtf } from '../fonts/ttf-parser';
+import { embedTtf } from '../fonts/ttf-embed';
 
 export interface AddTextSpec {
   pageIndex: number;
   x: number;
   y: number;
   text: string;
-  font: string; // 코어14 이름
+  /** Core 14 이름. ttf가 주어지면 무시. */
+  font: string;
   fontSize: number;
   color: { r: number; g: number; b: number };
+  /** 업로드된 TTF (있으면 우선) */
+  ttf?: { parsed: ParsedTtf; baseName: string };
 }
 
 export function addText(doc: PdfDocument, spec: AddTextSpec): void {
@@ -43,50 +45,51 @@ export function addText(doc: PdfDocument, spec: AddTextSpec): void {
   const page = pages[spec.pageIndex];
   if (!page) throw new Error(`Page ${spec.pageIndex} not found`);
 
-  // 1) 페이지 dict 가져오기 + clone (수정 위해)
   const pageDict = cloneObject(page.dict) as PdfDict;
 
-  // 2) Resources dict 보장 (페이지 자체에 없으면 inline 복제)
+  // Resources / Font dict 보장 (다른 페이지와 공유 시 inline 복제)
   let resources = dictGet(pageDict, 'Resources');
   let resourcesDict: PdfDict;
   if (resources && isRef(resources)) {
-    // shared resources를 직접 수정하면 다른 페이지에도 영향. 우리는 inline 복제.
     const resolved = doc.resolve(resources);
     if (resolved.kind !== 'dict') throw new Error('Resources is not a dict');
     resourcesDict = cloneObject(resolved) as PdfDict;
   } else if (resources && isDict(resources)) {
     resourcesDict = resources;
   } else {
-    // 상속 가능
     const inh = doc.inheritedAttr(pageDict, 'Resources');
     if (inh) {
       const r = doc.resolve(inh);
       resourcesDict = isDict(r) ? (cloneObject(r) as PdfDict) : pdfDict();
-    } else {
-      resourcesDict = pdfDict();
-    }
+    } else resourcesDict = pdfDict();
   }
   dictSet(pageDict, 'Resources', resourcesDict);
 
-  // 3) Font dict 보장
   let fontDict = dictGet(resourcesDict, 'Font');
   let fontDictResolved: PdfDict;
   if (fontDict && isRef(fontDict)) {
     const r = doc.resolve(fontDict);
-    if (r.kind === 'dict') fontDictResolved = cloneObject(r) as PdfDict;
-    else fontDictResolved = pdfDict();
+    fontDictResolved = r.kind === 'dict' ? (cloneObject(r) as PdfDict) : pdfDict();
   } else if (fontDict && isDict(fontDict)) {
     fontDictResolved = fontDict;
-  } else {
-    fontDictResolved = pdfDict();
-  }
+  } else fontDictResolved = pdfDict();
   dictSet(resourcesDict, 'Font', fontDictResolved);
 
-  // 4) 사용할 폰트 등록 (이미 같은 폰트가 있으면 재사용)
-  let resourceName = findOrRegisterFont(doc, fontDictResolved, spec.font);
+  // ---- 폰트 등록 + 텍스트 인코딩 ----
+  let resourceName: string;
+  let textShowBytes: string; // PDF content stream에 들어갈 형식: "(escaped) Tj" 또는 "<hex> Tj"
+  if (spec.ttf) {
+    const embed = embedTtf(doc, spec.ttf.parsed, spec.ttf.baseName);
+    resourceName = registerFontByRef(doc, fontDictResolved, embed.fontRef, spec.ttf.baseName);
+    const enc = embed.encodeHex(spec.text);
+    textShowBytes = `<${enc.hex}> Tj`;
+  } else {
+    resourceName = findOrRegisterCore14(doc, fontDictResolved, spec.font);
+    const escaped = escapeLiteralString(spec.text);
+    textShowBytes = `(${escaped}) Tj`;
+  }
 
-  // 5) 콘텐츠 fragment 생성
-  const escaped = escapeLiteralString(spec.text);
+  // ---- 콘텐츠 fragment ----
   const safeColor = (v: number) => Math.max(0, Math.min(1, v)).toFixed(3);
   const fragment =
     `\nq\n` +
@@ -94,11 +97,10 @@ export function addText(doc: PdfDocument, spec: AddTextSpec): void {
     `BT\n` +
     `/${resourceName} ${spec.fontSize} Tf\n` +
     `1 0 0 1 ${spec.x.toFixed(3)} ${spec.y.toFixed(3)} Tm\n` +
-    `(${escaped}) Tj\n` +
+    `${textShowBytes}\n` +
     `ET\n` +
     `Q\n`;
   const fragmentBytes = new TextEncoder().encode(fragment);
-  // FlateDecode 압축
   const compressed = zlib.deflateSync(Buffer.from(fragmentBytes));
   const fragmentStream = pdfStream(
     pdfDict([
@@ -109,37 +111,34 @@ export function addText(doc: PdfDocument, spec: AddTextSpec): void {
   );
   const fragmentRef = doc.allocateObject(fragmentStream);
 
-  // 6) /Contents를 array로 만들고 fragment ref 추가
+  // /Contents 를 array로 만들어 fragment 추가
   const cur = dictGet(pageDict, 'Contents');
   let newContents: PdfArray;
-  if (!cur) {
-    newContents = pdfArray([fragmentRef]);
-  } else if (isArray(cur)) {
-    newContents = pdfArray([...cur.items, fragmentRef]);
-  } else if (isRef(cur) || isStream(cur)) {
-    newContents = pdfArray([cur, fragmentRef]);
-  } else {
-    newContents = pdfArray([fragmentRef]);
-  }
+  if (!cur) newContents = pdfArray([fragmentRef]);
+  else if (isArray(cur)) newContents = pdfArray([...cur.items, fragmentRef]);
+  else if (isRef(cur) || isStream(cur)) newContents = pdfArray([cur, fragmentRef]);
+  else newContents = pdfArray([fragmentRef]);
   dictSet(pageDict, 'Contents', newContents);
 
-  // 7) 페이지 dict 갱신
   doc.markDirty(page.ref.num, page.ref.gen, pageDict);
 }
 
-function findOrRegisterFont(
-  doc: PdfDocument,
-  fontDict: PdfDict,
-  fontName: string,
-): string {
-  // 이미 같은 BaseFont로 등록된 폰트가 있는지 확인
+function findOrRegisterCore14(doc: PdfDocument, fontDict: PdfDict, fontName: string): string {
   for (const [name, ref] of fontDict.map) {
     const f = doc.resolve(ref);
     if (f.kind !== 'dict') continue;
     const bf = dictGet(f, 'BaseFont');
-    if (bf && bf.kind === 'name' && bf.value === fontName) return name;
+    const sub = dictGet(f, 'Subtype');
+    if (
+      bf &&
+      bf.kind === 'name' &&
+      bf.value === fontName &&
+      sub &&
+      sub.kind === 'name' &&
+      sub.value === 'Type1'
+    )
+      return name;
   }
-  // 새 등록
   let n = 1;
   let key = `F${n}`;
   while (fontDict.map.has(key)) {
@@ -157,9 +156,33 @@ function findOrRegisterFont(
   return key;
 }
 
-// PDF literal string 이스케이프. 비ASCII는 8진수로.
+function registerFontByRef(
+  doc: PdfDocument,
+  fontDict: PdfDict,
+  ref: PdfRef,
+  baseName: string,
+): string {
+  // 같은 ref 가 이미 있으면 재사용 — 같은 페이지에 여러 번 add-text 시 dedup
+  for (const [name, existing] of fontDict.map) {
+    if (
+      existing.kind === 'ref' &&
+      existing.num === ref.num &&
+      existing.gen === ref.gen
+    )
+      return name;
+  }
+  let n = 1;
+  let key = `F${n}`;
+  while (fontDict.map.has(key)) {
+    n += 1;
+    key = `F${n}`;
+  }
+  void baseName;
+  dictSet(fontDict, key, ref);
+  return key;
+}
+
 function escapeLiteralString(s: string): string {
-  // WinAnsi 인코딩으로 변환 — 단순화: latin1로.
   let out = '';
   for (let i = 0; i < s.length; i += 1) {
     const c = s.charCodeAt(i);
@@ -170,10 +193,7 @@ function escapeLiteralString(s: string): string {
     else if (c === 0x0d) out += '\\r';
     else if (c >= 0x20 && c <= 0x7e) out += s[i];
     else if (c <= 0xff) out += '\\' + c.toString(8).padStart(3, '0');
-    else {
-      // 비latin1 — '?'로 대체 (코어14 폰트는 어차피 표시 못함)
-      out += '?';
-    }
+    else out += '?';
   }
   return out;
 }
