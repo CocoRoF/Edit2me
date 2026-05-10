@@ -126,6 +126,8 @@ export function buildFontInfo(
   let cidSystemInfo: { registry: string; ordering: string } | null = null;
   let outlineCache: GlyphOutlineCache | null = null;
   let unitsPerEm = 1000;
+  // CID → GID 매핑. null 이면 identity (GID = CID).
+  let cidToGid: ((cid: number) => number) | null = null;
   if (isComposite) {
     const descendants = dictGet(fontDict, 'DescendantFonts');
     if (descendants && isArray(descendants)) {
@@ -185,6 +187,27 @@ export function buildFontInfo(
                 }
               }
             }
+          }
+          // CIDToGIDMap (PDF spec §9.7.4.2): /Identity 면 GID = CID. stream 이면 각 CID 의
+          // GID 가 stream 의 byte i*2..i*2+1 (big-endian uint16). 이걸 안 쓰면 NanumGothic
+          // 처럼 non-Identity map 을 가진 폰트에서 CID 99 (space) 가 GID 99 (예: '확')
+          // 로 그려져 텍스트가 깨짐.
+          const cidToGidObj = dictGet(cidFont, 'CIDToGIDMap');
+          if (cidToGidObj) {
+            const r = doc.resolve(cidToGidObj);
+            if (isStream(r)) {
+              try {
+                const bytes = decodeStream(r);
+                cidToGid = (cid: number) => {
+                  const off = cid * 2;
+                  if (off + 1 >= bytes.length) return 0;
+                  return (bytes[off]! << 8) | bytes[off + 1]!;
+                };
+              } catch {
+                /* ignore — fall through to identity */
+              }
+            }
+            // Name /Identity (또는 누락) 은 cidToGid = null 유지 → CID === GID
           }
         }
       }
@@ -301,12 +324,12 @@ export function buildFontInfo(
     unitsPerEm,
     glyphOutline: outlineCache
       ? (code: number) => {
-          // Type0 + Identity-H/V 의 경우 code === GID. 그 외는 code → GID 변환 필요.
-          // Composite font: code 는 CID 이고 CIDToGIDMap = Identity 가 일반 → GID = CID.
-          // Simple TTF: code → glyph index 는 cmap 또는 differences 로. 여기선 단순화 — 우리가 이미
-          //   만든 TTF parser 의 unicodeToGid 가 별도. 단순 폰트 outline 은 향후 보강 — 지금은
-          //   composite Type0 만 outline 사용 추천.
-          const path = outlineCache!.outline(code);
+          // Composite font: code 는 CID. CIDToGIDMap (stream) 이 있으면 그걸로 GID 변환,
+          // 없으면 (또는 /Identity) GID === CID. NanumGothic 처럼 non-Identity map 을 가진
+          // 폰트에서 이 변환을 빠뜨리면 잘못된 글리프가 그려진다.
+          // Simple TTF 는 cmap 으로 별도 처리 — 현재 outline 사용은 composite Type0 위주.
+          const gid = cidToGid ? cidToGid(code) : code;
+          const path = outlineCache!.outline(gid);
           return path === '' ? null : path;
         }
       : null,
