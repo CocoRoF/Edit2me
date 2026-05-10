@@ -2,7 +2,7 @@
 
 브라우저에서 동작하는 PDF 온라인 편집기. PDF 파서/라이터를 외부 라이브러리 없이 **PDF 객체 레벨에서 직접 구현**하는 것을 핵심 원칙으로 한다.
 
-> **상태**: v0.3 (PR #1–18 완료). 5개 MVP + undo/redo + i18n + 단위 테스트(44개) + 모바일 + **CJK 한글 add-text** + vertical writing + 회전 페이지 좌표 보정 + 항상-on 진단 + surgical updates + 호스트 빌드시 CJK CMap 자동 fetch. 변경 내역은 [`docs/15-v0.3-changelog.md`](./docs/15-v0.3-changelog.md) (v0.2 는 [`14`](./docs/14-v0.2-changelog.md)). 자체 raster renderer 보류 결정은 [`docs/adr/0004-raster-renderer-deferred.md`](./docs/adr/0004-raster-renderer-deferred.md).
+> **상태**: v0.4 (PR #1–23 완료). 5개 MVP + undo/redo + i18n + 단위 테스트(48개) + 모바일 + **CJK 한글 add-text** + vertical writing + 회전 페이지 좌표 보정 + 항상-on 진단 + surgical updates + 호스트 빌드시 CJK CMap 자동 fetch + **자체 SVG 벡터 렌더러** (도형·이미지·Form XObject·Indexed CS·임베디드 폰트 outline 모두 표시). 변경 내역: [`16` v0.4](./docs/16-v0.4-changelog.md) → [`15` v0.3](./docs/15-v0.3-changelog.md) → [`14` v0.2](./docs/14-v0.2-changelog.md). 보류/대안 결정: [`docs/adr/`](./docs/adr/).
 
 ## 핵심 제약 (Non-negotiable)
 
@@ -67,6 +67,7 @@
 | 13 | [quality-review.md](./docs/13-quality-review.md) | v0 audit + 진행 체크리스트 |
 | 14 | [v0.2-changelog.md](./docs/14-v0.2-changelog.md) | PR #1–9 변경 요약 |
 | 15 | [v0.3-changelog.md](./docs/15-v0.3-changelog.md) | PR #10–18 변경 요약 |
+| 16 | [v0.4-changelog.md](./docs/16-v0.4-changelog.md) | PR #19–23 vector renderer |
 
 ADR: [`docs/adr/`](./docs/adr/) (0001 no-libs · 0002 nextjs-monolith · 0003 mount-under-blog · 0004 raster-deferred)
 
