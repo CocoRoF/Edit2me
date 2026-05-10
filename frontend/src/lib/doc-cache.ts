@@ -104,6 +104,29 @@ export async function disposeDoc(docId: string): Promise<void> {
   await deleteDoc(docId);
 }
 
+/**
+ * doc 의 bytes 를 통째로 교체 — insert-pdf 같은 destructive 한 op 에 사용.
+ * history/redoStack/textCache 가 모두 invalid 해지므로 reset. revision 은 +1.
+ * (TODO: 진정한 undo/redo 지원하려면 op-replay 모델로 재설계 필요. 본 helper 는 임시.)
+ */
+export async function replaceDocBytes(
+  docId: string,
+  newBytes: Uint8Array,
+): Promise<DocEntry | null> {
+  const entry = await getDoc(docId);
+  if (!entry) return null;
+  await putUpload(docId, newBytes);
+  entry.doc = PdfDocument.open(newBytes);
+  entry.originalBytes = newBytes;
+  entry.history = [];
+  entry.redoStack = [];
+  entry.textCache.clear();
+  entry.svgCache.clear();
+  entry.revision += 1;
+  entry.lastAccess = Date.now();
+  return entry;
+}
+
 export interface OpResult {
   revision: number;
   affectedPages: number[];

@@ -7,6 +7,7 @@ import {
   finalizeDoc,
   getDocument,
   getPageTextBatch,
+  insertPdfPages,
   undoOp,
   redoOp,
   type DocumentMeta,
@@ -57,6 +58,8 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
   const [helpOpen, setHelpOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  // op 후 scroll 복원 대상 페이지 (배열 위치). useEffect 가 잡아 scrollIntoView.
+  const [scrollToIndex, setScrollToIndex] = useState<number | null>(null);
 
   // 초기 로드 + 모든 페이지 텍스트 batch 로드
   useEffect(() => {
@@ -218,12 +221,16 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
   );
 
   const runOps = useCallback(
-    async (ops: Op[]) => {
+    async (ops: Op[], scrollTo?: number) => {
       if (!meta) return;
       try {
         const res = await apiApplyOps(docId, meta.revision, ops);
         applyOpResult(res);
         setModified(true);
+        if (typeof scrollTo === 'number') {
+          // 다음 layout 후 scrollIntoView 가 동작하도록 effect 가 잡음.
+          setScrollToIndex(Math.max(0, Math.min(res.newPageCount - 1, scrollTo)));
+        }
         if (
           ops.some(
             (o) => o.op === 'delete-pages' || o.op === 'reorder-pages' || o.op === 'rotate-pages',
@@ -240,6 +247,55 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
       }
     },
     [docId, meta, applyOpResult, reloadAffected, reloadAllText, toast],
+  );
+
+  // 페이지 수정 op 후 해당 페이지가 화면에서 사라지지 않도록 scroll 복원.
+  // meta.revision 이 바뀐 직후 (re-render 완료 후) 동작.
+  useEffect(() => {
+    if (scrollToIndex == null) return;
+    // RAF 으로 layout 한 사이클 미루기 (DOM 이 새 페이지 위치 반영하도록).
+    const id = requestAnimationFrame(() => {
+      const root = canvasRef.current;
+      if (!root) return;
+      const el = root.querySelector<HTMLElement>(`[data-page-index="${scrollToIndex}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setScrollToIndex(null);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [scrollToIndex, meta?.revision]);
+
+  const handleInsertPdf = useCallback(
+    async (file: File, insertAt: number) => {
+      if (!meta) return;
+      try {
+        const res = await insertPdfPages(docId, file, insertAt);
+        // applyOpResult 와 비슷한 처리 — 단 history 가 reset 되어 canUndo=false.
+        setMeta((cur) =>
+          cur
+            ? {
+                ...cur,
+                revision: res.revision,
+                pages: res.pages,
+                pageCount: res.pageCount,
+                canUndo: res.canUndo,
+                canRedo: res.canRedo,
+              }
+            : cur,
+        );
+        setCanUndo(res.canUndo);
+        setCanRedo(res.canRedo);
+        setReload((x) => x + 1);
+        setSelected(new Set());
+        setActive(res.insertedFirstIndex);
+        setScrollToIndex(res.insertedFirstIndex);
+        setModified(true);
+        await reloadAllText();
+        toast.info(`${res.insertedCount} 페이지 추가됨`);
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    },
+    [docId, meta, reloadAllText, toast],
   );
 
   const handleUndo = useCallback(async () => {
@@ -286,10 +342,13 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
     [activeIndex],
   );
 
+  // 단일 페이지 op (rotate / delete) 는 그 페이지 위치로 scroll 유지. reorder/다중도
+  // indices[0] 기준으로 (대표 페이지) — 일괄 삭제면 직전 page 가 자연스럽게 보임.
   const handleReorder = (perm: number[]) => runOps([{ op: 'reorder-pages', permutation: perm }]);
-  const handleDelete = (indices: number[]) => runOps([{ op: 'delete-pages', indices }]);
+  const handleDelete = (indices: number[]) =>
+    runOps([{ op: 'delete-pages', indices }], indices.length > 0 ? indices[0] : undefined);
   const handleRotate = (indices: number[], angle: 90 | -90) =>
-    runOps([{ op: 'rotate-pages', indices, angle }]);
+    runOps([{ op: 'rotate-pages', indices, angle }], indices.length > 0 ? indices[0] : undefined);
   const handleEditText = (blockId: string, newText: string) =>
     runOps([{ op: 'edit-text', pageIndex: activeIndex, blockId, newText }]);
 
@@ -442,6 +501,7 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
                 selected={selected.has(i)}
                 onRotate={(angle) => handleRotate([i], angle)}
                 onDelete={() => handleDelete([i])}
+                onInsertPdf={(file) => handleInsertPdf(file, i)}
                 onActivate={() => {
                   // 캔버스 페이지 클릭 → 사이드바 선택 동기화: single 모드 select + activate.
                   handleSelect(i, 'single');

@@ -170,6 +170,36 @@ export async function applyOps(
   return (await res.json()) as OpResult;
 }
 
+export interface InsertPdfResult {
+  revision: number;
+  pageCount: number;
+  pages: Array<{ index: number; width: number; height: number; rotate: 0 | 90 | 180 | 270 }>;
+  canUndo: boolean;
+  canRedo: boolean;
+  insertedFirstIndex: number;
+  insertedCount: number;
+}
+
+export async function insertPdfPages(
+  docId: string,
+  file: File | Blob,
+  insertAt: number,
+): Promise<InsertPdfResult> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('insertAt', String(insertAt));
+  const res = await fetch(apiUrl(`/api/documents/${docId}/insert-pdf`), {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Insert PDF failed (${res.status})`);
+  }
+  invalidateDocCache(docId);
+  return (await res.json()) as InsertPdfResult;
+}
+
 export async function undoOp(docId: string): Promise<OpResult> {
   const res = await fetch(apiUrl(`/api/documents/${docId}/undo`), { method: 'POST' });
   if (!res.ok) throw new Error(`Undo failed (${res.status})`);
