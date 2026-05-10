@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import type { PageMeta } from '@/lib/api';
 import { thumbUrl } from '@/lib/api';
-import { Trash2, RotateCw, RotateCcw, Layers, X, GripVertical } from 'lucide-react';
+import { Trash2, Layers, X, GripVertical } from 'lucide-react';
 import {
   DndContext,
   DragOverlay,
@@ -33,7 +33,6 @@ interface BaseProps {
   onActivate: (index: number) => void;
   onReorder: (perm: number[]) => void;
   onDelete: (indices: number[]) => void;
-  onRotate: (indices: number[], angle: 90 | -90) => void;
   reload?: number;
   /** 현재 문서 revision — thumb URL cache 무효화에 사용 */
   revision?: number;
@@ -110,7 +109,6 @@ function SidebarBody(props: BaseProps) {
     onActivate,
     onReorder,
     onDelete,
-    onRotate,
     reload,
     revision,
   } = props;
@@ -159,12 +157,7 @@ function SidebarBody(props: BaseProps) {
         </div>
         {selected.size > 0 && (
           <div className="flex gap-0.5">
-            <IconBtn title="역회전" onClick={() => onRotate([...selected], -90)}>
-              <RotateCcw size={13} />
-            </IconBtn>
-            <IconBtn title="회전" onClick={() => onRotate([...selected], 90)}>
-              <RotateCw size={13} />
-            </IconBtn>
+            {/* 회전은 캔버스 쪽 페이지별 액션으로 이동. 사이드바엔 일괄 삭제만 유지. */}
             <IconBtn title="삭제" onClick={() => onDelete([...selected])} danger>
               <Trash2 size={13} />
             </IconBtn>

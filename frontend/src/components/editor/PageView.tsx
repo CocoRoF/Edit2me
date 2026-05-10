@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import type { PageMeta, PageText, TextBlock } from '@/lib/api';
 import { svgUrl } from '@/lib/api';
 import { useIntersection } from '@/hooks/useIntersection';
+import { RotateCcw, RotateCw, Trash2 } from 'lucide-react';
 
 interface Props {
   docId: string;
@@ -19,6 +20,12 @@ interface Props {
   onCanvasClick?: (pageIndex: number, x: number, y: number) => void;
   addTextMode?: boolean;
   active?: boolean;
+  /** 다중 선택 상태에 포함되면 라벨 옆 actions 노출 */
+  selected?: boolean;
+  /** 페이지 회전 (active or selected 일 때 캔버스 라벨에서 호출) */
+  onRotate?: (angle: 90 | -90) => void;
+  /** 페이지 삭제 */
+  onDelete?: () => void;
 }
 
 export function PageView({
@@ -33,6 +40,9 @@ export function PageView({
   onCanvasClick,
   addTextMode,
   active,
+  selected,
+  onRotate,
+  onDelete,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [ref, inView] = useIntersection<HTMLDivElement>('1000px');
@@ -54,7 +64,8 @@ export function PageView({
       className="flex flex-col items-center gap-2 shrink-0"
       style={{ width: w }}
     >
-      {/* 페이지 구분 라벨 — accent dot + "페이지 N / 총 M". active 페이지면 강조. */}
+      {/* 페이지 구분 라벨 — accent dot + "페이지 N / 총 M". active 페이지면 강조.
+          selected 또는 active 일 때 라벨 옆에 회전/삭제 액션 노출. */}
       <div
         className="flex items-center gap-2 text-xs select-none"
         style={{ color: active ? 'var(--color-accent)' : 'var(--color-muted)' }}
@@ -69,6 +80,31 @@ export function PageView({
           페이지 {displayIndex} <span className="opacity-60">/ {totalPages}</span>
         </span>
         <span className="w-12 h-px" style={{ background: 'var(--color-line)' }} />
+        {(active || selected) && (onRotate || onDelete) && (
+          <div
+            className="inline-flex items-center gap-0.5 ml-1 rounded-md border px-0.5"
+            style={{
+              borderColor: 'var(--color-line)',
+              background: 'var(--color-surface)',
+            }}
+          >
+            {onRotate && (
+              <PageActionBtn title="역회전 (반시계 90°)" onClick={() => onRotate(-90)}>
+                <RotateCcw size={14} />
+              </PageActionBtn>
+            )}
+            {onRotate && (
+              <PageActionBtn title="회전 (시계 90°)" onClick={() => onRotate(90)}>
+                <RotateCw size={14} />
+              </PageActionBtn>
+            )}
+            {onDelete && (
+              <PageActionBtn title="페이지 삭제" onClick={onDelete} danger>
+                <Trash2 size={14} />
+              </PageActionBtn>
+            )}
+          </div>
+        )}
       </div>
     <div
       className="relative paper"
@@ -240,5 +276,49 @@ function TextBlockEditor({
     >
       {b.text}
     </span>
+  );
+}
+
+// 캔버스 페이지 라벨 옆에 노출되는 작은 ghost icon button — segmented group 안의 cell.
+function PageActionBtn({
+  children,
+  title,
+  onClick,
+  danger,
+}: {
+  children: React.ReactNode;
+  title: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      title={title}
+      className="w-7 h-7 inline-flex items-center justify-center rounded transition-colors"
+      style={{
+        color: danger ? 'var(--color-danger)' : 'var(--color-muted)',
+        background: 'transparent',
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = danger
+          ? 'var(--color-danger-soft)'
+          : 'var(--color-surface-2)';
+        (e.currentTarget as HTMLButtonElement).style.color = danger
+          ? 'var(--color-danger)'
+          : 'var(--color-ink)';
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+        (e.currentTarget as HTMLButtonElement).style.color = danger
+          ? 'var(--color-danger)'
+          : 'var(--color-muted)';
+      }}
+    >
+      {children}
+    </button>
   );
 }
