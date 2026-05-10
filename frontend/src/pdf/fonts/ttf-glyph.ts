@@ -18,7 +18,19 @@ export interface GlyphOutlineCache {
   outline: (gid: number) => string;
 }
 
+// 모듈 레벨 cache — 같은 raw bytes (PdfDocument resolve 캐시 덕에 same identity)
+// 에 대해 glyph outline 빌더를 한 번만 생성. 페이지마다 buildFontInfo 가 호출되더라도
+// 비싼 TTF 테이블 파싱은 1회.
+const moduleCache = new WeakMap<Uint8Array, GlyphOutlineCache | null>();
+
 export function buildGlyphOutlineCache(raw: Uint8Array): GlyphOutlineCache | null {
+  if (moduleCache.has(raw)) return moduleCache.get(raw)!;
+  const result = buildGlyphOutlineCacheUncached(raw);
+  moduleCache.set(raw, result);
+  return result;
+}
+
+function buildGlyphOutlineCacheUncached(raw: Uint8Array): GlyphOutlineCache | null {
   try {
     const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
     if (raw.byteLength < 12) return null;

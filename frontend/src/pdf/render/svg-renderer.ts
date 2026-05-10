@@ -178,6 +178,9 @@ export function renderPageSvg(
   const out: string[] = [];
   const defs: string[] = [];
   let clipCounter = 0;
+  // Symbol id 등록 — 같은 글리프(font baseName + GID) 의 outline 을 한 번만 defs 에.
+  // ID: g{baseSafe}-{gid}. SVG 안에서 `<use href="#id">` 로 참조해 size 큰 폭 절약.
+  const glyphSymbolIds = new Set<string>();
 
   let cur = newState();
   const stack: GfxState[] = [];
@@ -398,6 +401,14 @@ export function renderPageSvg(
       if (useOutline) {
         const path = font.glyphOutline!(code);
         if (path) {
+          // Symbol id — font baseName + code.
+          const safeBase = font.baseName.replace(/[^A-Za-z0-9]/g, '_');
+          const symId = `g_${safeBase}_${code}`;
+          if (!glyphSymbolIds.has(symId)) {
+            glyphSymbolIds.add(symId);
+            // <symbol> 안의 path 는 자체 좌표계 (font unit). transform 으로 호출자가 위치/스케일.
+            defs.push(`<symbol id="${symId}" overflow="visible"><path d="${path}"/></symbol>`);
+          }
           const textM: Mat6 = [
             (ts.Tfs * horizScale) / upe,
             0,
@@ -408,10 +419,9 @@ export function renderPageSvg(
           ];
           const wm = mul(textM, glyphTm);
           const final = mul(wm, ts.ctm);
-          // outer flip 보정 위해 자체 y-flip
           const transform = `matrix(${fmt(final[0])},${fmt(final[1])},${fmt(-final[2])},${fmt(-final[3])},${fmt(final[4])},${fmt(final[5])})`;
           out.push(
-            `<path${clipAttr()} d="${path}" transform="${transform}" fill="${fill}"${cur.alpha < 1 ? ` fill-opacity="${fmt(cur.alpha)}"` : ''}/>`,
+            `<use${clipAttr()} href="#${symId}" transform="${transform}" fill="${fill}"${cur.alpha < 1 ? ` fill-opacity="${fmt(cur.alpha)}"` : ''}/>`,
           );
         } else {
           const u = font.toUnicode(code) ?? ' ';
@@ -621,7 +631,11 @@ export function renderPageSvg(
   // ---- Op dispatch (재귀 가능) ----
   function runOpsScope(opList: typeof ops, depth: number): void {
     for (const { op } of opList) {
-      runOneOp(op, depth);
+      try {
+        runOneOp(op, depth);
+      } catch (e) {
+        diagnostics.add(`op-failed:${op.op}:${(e as Error).message.slice(0, 60)}`);
+      }
     }
   }
 

@@ -111,6 +111,20 @@ export function parseContent(data: Uint8Array): ContentOpWithSource[] {
     if (t.type === 'eof') break;
     if (t.type === 'keyword') {
       const kw = t.value as string;
+      // Inline image: BI 부터 EI 까지의 본문은 임의 binary 라 일반 토크나이저로 파싱
+      // 시도하면 잘못된 op 가 생성되거나 무한 loop 가능. EI 키워드를 raw byte 검색으로 skip.
+      if (kw === 'BI') {
+        const eiPos = findKeywordRaw(data, tk.pos, 'EI');
+        if (eiPos < 0) break; // 끝까지 EI 없음 — 손상
+        out.push({
+          op: { op: 'BI' },
+          source: { start: opStartByte, end: eiPos + 2, opIndex: out.length },
+        });
+        tk.pos = eiPos + 2;
+        operands = [];
+        opStartByte = tk.pos;
+        continue;
+      }
       const op = makeOp(kw, operands);
       if (op) {
         out.push({
@@ -182,6 +196,32 @@ export function parseContent(data: Uint8Array): ContentOpWithSource[] {
     }
   }
   return out;
+}
+
+// Raw byte search for keyword followed by whitespace/EOF or delimiter.
+function findKeywordRaw(data: Uint8Array, from: number, kw: string): number {
+  const target = new TextEncoder().encode(kw);
+  for (let i = from; i + target.length <= data.length; i += 1) {
+    let match = true;
+    for (let j = 0; j < target.length; j += 1) {
+      if (data[i + j] !== target[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (!match) continue;
+    // 앞: whitespace 또는 시작
+    const before = i === 0 ? 0x20 : data[i - 1]!;
+    // 뒤: whitespace, delimiter, EOF
+    const after = i + target.length >= data.length ? 0x20 : data[i + target.length]!;
+    const isWs = (b: number) => b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d || b === 0x0c;
+    const isDelim = (b: number) =>
+      b === 0x28 || b === 0x29 || b === 0x3c || b === 0x3e || b === 0x5b || b === 0x5d || b === 0x2f;
+    if ((isWs(before) || isDelim(before)) && (isWs(after) || isDelim(after))) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 function num(operands: PdfObject[], i: number): number {
