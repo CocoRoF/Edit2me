@@ -90,6 +90,8 @@ export function PageView({
             display: 'block',
             pointerEvents: 'none',
             userSelect: 'none',
+            opacity: svgLoaded ? 1 : 0,
+            transition: 'opacity 120ms ease',
           }}
         />
       )}
