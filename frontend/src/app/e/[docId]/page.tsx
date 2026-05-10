@@ -427,7 +427,7 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
           {meta.pages.length === 0 ? (
             <div className="text-sm text-[color:var(--color-muted)]">페이지가 없습니다</div>
           ) : (
-            meta.pages.map((p) => (
+            meta.pages.map((p, i) => (
               <PageView
                 key={`${p.index}-${reload}`}
                 docId={docId}
@@ -435,6 +435,8 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
                 pageText={pageTexts.get(p.index) ?? null}
                 zoom={zoom}
                 revision={meta.revision}
+                displayIndex={i + 1}
+                totalPages={meta.pages.length}
                 onEditText={p.index === activeIndex ? handleEditText : undefined}
                 onCanvasClick={addTextMode ? handleCanvasClick : undefined}
                 addTextMode={addTextMode && p.index === activeIndex}

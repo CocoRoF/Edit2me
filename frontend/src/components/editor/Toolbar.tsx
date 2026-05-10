@@ -4,9 +4,12 @@ import {
   Type, Download, Loader2, FileText, Minus, Plus, Undo2, Redo2,
   HelpCircle, AlertTriangle, Menu,
 } from 'lucide-react';
-import { Kbd } from '@/components/ui/Kbd';
 import { LocaleToggle } from '@/components/ui/LocaleToggle';
 import { useI18n } from '@/lib/i18n/context';
+
+// Mac 인지 brower 감지해서 단축키 표기 — 서버 렌더 시엔 'Ctrl' 로 안전 fallback.
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const META_KEY_LABEL = isMac ? '⌘' : 'Ctrl';
 
 interface Props {
   docName: string;
@@ -170,10 +173,29 @@ export function Toolbar({
         <LocaleToggle />
       </span>
 
-      <button onClick={onDownload} disabled={downloading} className="btn btn-primary h-9">
+      {/* Primary CTA — toolbar 의 다른 ghost 버튼들과 명확히 구분되는 accent 색.
+          단축키는 Kbd 칩 대신 평문 (Ctrl + S) 으로 표기 — 가독성/일관성. */}
+      <button
+        onClick={onDownload}
+        disabled={downloading}
+        className="h-9 px-3 inline-flex items-center gap-2 rounded-md text-white font-medium text-sm transition-colors disabled:opacity-60"
+        style={{
+          background: 'var(--color-accent)',
+          boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 8px -4px rgba(79, 70, 229, 0.4)',
+        }}
+        onMouseEnter={(e) => {
+          if (!downloading) (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-accent-hover)';
+        }}
+        onMouseLeave={(e) => {
+          if (!downloading) (e.currentTarget as HTMLButtonElement).style.background = 'var(--color-accent)';
+        }}
+        title={`${t('editor.download')} (${META_KEY_LABEL}+S)`}
+      >
         {downloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
         <span className="hidden sm:inline">{t('editor.download')}</span>
-        <span className="hidden md:inline"><Kbd>⌘S</Kbd></span>
+        <span className="hidden md:inline text-[12px] opacity-80 font-normal">
+          ({META_KEY_LABEL} + S)
+        </span>
       </button>
     </header>
   );

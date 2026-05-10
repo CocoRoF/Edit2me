@@ -3,7 +3,26 @@
 import { useState } from 'react';
 import type { PageMeta } from '@/lib/api';
 import { thumbUrl } from '@/lib/api';
-import { Trash2, RotateCw, RotateCcw, Layers, X } from 'lucide-react';
+import { Trash2, RotateCw, RotateCcw, Layers, X, GripVertical } from 'lucide-react';
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragStartEvent,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+  sortableKeyboardCoordinates,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 interface BaseProps {
   docId: string;
@@ -39,7 +58,7 @@ export function Sidebar(props: Props) {
           />
         )}
         <aside
-          className="md:hidden fixed left-0 top-0 bottom-0 z-40 w-60 flex flex-col border-r transition-transform"
+          className="md:hidden fixed left-0 top-0 bottom-0 z-40 w-64 flex flex-col border-r transition-transform"
           style={{
             background: 'var(--color-surface)',
             borderColor: 'var(--color-line)',
@@ -73,8 +92,6 @@ export function Sidebar(props: Props) {
 
   return (
     <aside
-      // w-44 (176px) 는 thumbnail + 페이지 번호 + selection action 들이 좁게 느껴짐
-      // → w-64 (256px) 로 확장. icon 들도 자연스럽게 펼쳐짐.
       className="hidden md:flex w-64 shrink-0 flex-col border-r"
       style={{ background: 'var(--color-surface)', borderColor: 'var(--color-line)' }}
     >
@@ -97,8 +114,39 @@ function SidebarBody(props: BaseProps) {
     reload,
     revision,
   } = props;
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [dropIdx, setDropIdx] = useState<number | null>(null);
+
+  // dnd-kit: 8px 이상 움직여야 drag 시작 — 클릭과 충돌 방지.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+
+  // sortable item 의 stable id — page.index 가 reorder 후에도 보존됨.
+  const itemIds = pages.map((p) => `pg-${p.index}`);
+
+  function handleDragStart(e: DragStartEvent) {
+    setActiveDragId(String(e.active.id));
+  }
+  function handleDragEnd(e: DragEndEvent) {
+    setActiveDragId(null);
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const from = itemIds.indexOf(String(active.id));
+    const to = itemIds.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    // 현재 순서 (0..n-1) 를 arrayMove 로 재배열 → permutation 으로 backend 에 전달.
+    const perm = arrayMove(
+      pages.map((_, i) => i),
+      from,
+      to,
+    );
+    onReorder(perm);
+  }
+
+  const activeIdx = activeDragId ? itemIds.indexOf(activeDragId) : -1;
+  const activePage = activeIdx >= 0 ? pages[activeIdx] : null;
 
   return (
     <>
@@ -124,77 +172,198 @@ function SidebarBody(props: BaseProps) {
         )}
       </div>
 
-      <ol className="flex-1 overflow-y-auto thin-scroll px-2.5 py-3 flex flex-col gap-2.5">
-        {pages.map((p, i) => {
-          const isActive = i === activeIndex;
-          const isSelected = selected.has(i);
-          const isDropTarget = dropIdx === i;
-          return (
-            <li
-              key={`${p.index}-${reload}`}
-              className="relative cursor-pointer"
-              draggable
-              onDragStart={() => setDragIdx(i)}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDropIdx(i);
-              }}
-              onDragLeave={() => setDropIdx((cur) => (cur === i ? null : cur))}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (dragIdx === null || dragIdx === i) return;
-                const perm = pages.map((_, idx) => idx);
-                const [moved] = perm.splice(dragIdx, 1);
-                perm.splice(i, 0, moved!);
-                onReorder(perm);
-                setDragIdx(null);
-                setDropIdx(null);
-              }}
-              onDragEnd={() => {
-                setDragIdx(null);
-                setDropIdx(null);
-              }}
-              onClick={(e) => {
-                if (e.shiftKey) onSelect(i, 'range');
-                else if (e.metaKey || e.ctrlKey) onSelect(i, 'toggle');
-                else onSelect(i, 'single');
-                onActivate(i);
-              }}
-            >
-              <div
-                className={`relative rounded transition-shadow ${isDropTarget ? 'drag-target-hover' : ''}`}
-                style={{
-                  outline: isActive
-                    ? `2px solid var(--color-accent)`
-                    : isSelected
-                      ? `2px solid var(--color-accent-ring)`
-                      : `1px solid var(--color-line)`,
-                  outlineOffset: '0',
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={() => setActiveDragId(null)}
+      >
+        <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+          <ol className="flex-1 overflow-y-auto thin-scroll px-2.5 py-3 flex flex-col gap-2.5">
+            {pages.map((p, i) => (
+              <SortableThumb
+                key={`${p.index}-${reload ?? 0}`}
+                id={itemIds[i]!}
+                docId={docId}
+                pageIndex={i}
+                originalIndex={p.index}
+                isActive={i === activeIndex}
+                isSelected={selected.has(i)}
+                isDraggingThis={activeDragId === itemIds[i]}
+                revision={revision}
+                onClick={(e) => {
+                  if (e.shiftKey) onSelect(i, 'range');
+                  else if (e.metaKey || e.ctrlKey) onSelect(i, 'toggle');
+                  else onSelect(i, 'single');
+                  onActivate(i);
                 }}
-              >
-                <img
-                  // revision 을 query 로 넣어 reorder/rotate/delete 직후 같은 슬롯의
-                  // thumb 이 stale cache 로 보이는 문제 해결.
-                  src={thumbUrl(docId, i, 220, revision ?? 0)}
-                  alt={`page ${i + 1}`}
-                  className="w-full h-auto block rounded-sm"
-                  draggable={false}
-                />
-              </div>
-              <div
-                className="mt-1 text-[11px] text-center"
-                style={{
-                  color: isActive ? 'var(--color-accent)' : 'var(--color-muted)',
-                  fontWeight: isActive ? 600 : 400,
-                }}
-              >
-                {i + 1}
-              </div>
-            </li>
-          );
-        })}
-      </ol>
+              />
+            ))}
+          </ol>
+        </SortableContext>
+
+        {/* DragOverlay: 드래그 중 cursor 옆에 따라다니는 floating clone — 어떤 페이지를
+            옮기는지 명확히 보임. 원본 위치엔 placeholder 자리. */}
+        <DragOverlay dropAnimation={null}>
+          {activePage ? (
+            <DragPreview
+              docId={docId}
+              originalIndex={activePage.index}
+              pageNumber={activeIdx + 1}
+              revision={revision}
+            />
+          ) : null}
+        </DragOverlay>
+      </DndContext>
     </>
+  );
+}
+
+function SortableThumb({
+  id,
+  docId,
+  pageIndex,
+  originalIndex,
+  isActive,
+  isSelected,
+  isDraggingThis,
+  revision,
+  onClick,
+}: {
+  id: string;
+  docId: string;
+  pageIndex: number;
+  originalIndex: number;
+  isActive: boolean;
+  isSelected: boolean;
+  isDraggingThis: boolean;
+  revision?: number;
+  onClick: (e: React.MouseEvent) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isOver,
+    isDragging,
+  } = useSortable({ id });
+
+  // 원본 자리: 드래그 중 빈 placeholder 처럼 흐리게.
+  const placeholderStyle = isDraggingThis
+    ? { opacity: 0.25, transition }
+    : { transform: CSS.Transform.toString(transform), transition };
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={placeholderStyle}
+      className="relative cursor-pointer"
+      onClick={onClick}
+    >
+      {/* drop position indicator — drag over 시 위쪽에 accent line */}
+      {isOver && !isDraggingThis && (
+        <div
+          className="absolute left-0 right-0 -top-1.5 h-0.5 rounded-full pointer-events-none"
+          style={{ background: 'var(--color-accent)', boxShadow: '0 0 0 2px var(--color-accent-soft)' }}
+        />
+      )}
+      <div
+        className="relative rounded transition-shadow"
+        style={{
+          outline: isActive
+            ? `2px solid var(--color-accent)`
+            : isSelected
+              ? `2px solid var(--color-accent-ring)`
+              : `1px solid var(--color-line)`,
+          outlineOffset: '0',
+        }}
+      >
+        <img
+          src={thumbUrl(docId, pageIndex, 220, revision ?? 0)}
+          alt={`page ${pageIndex + 1}`}
+          className="w-full h-auto block rounded-sm"
+          draggable={false}
+        />
+        {/* drag handle — 좌상단 grip. 썸네일 자체 클릭은 select/activate, handle 만 drag */}
+        <button
+          {...attributes}
+          {...listeners}
+          aria-label={`드래그하여 페이지 ${pageIndex + 1} 순서 변경`}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-1 left-1 w-6 h-6 rounded inline-flex items-center justify-center cursor-grab active:cursor-grabbing transition-opacity"
+          style={{
+            background: 'rgba(0,0,0,0.55)',
+            color: '#fff',
+            opacity: isDragging ? 1 : 0,
+          }}
+          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = '1')}
+          onMouseLeave={(e) => {
+            if (!isDragging) (e.currentTarget as HTMLButtonElement).style.opacity = '0';
+          }}
+        >
+          <GripVertical size={14} />
+        </button>
+      </div>
+      <div
+        className="mt-1 text-[11px] text-center"
+        style={{
+          color: isActive ? 'var(--color-accent)' : 'var(--color-muted)',
+          fontWeight: isActive ? 600 : 400,
+        }}
+      >
+        {pageIndex + 1}
+      </div>
+      {/* drop indicator after last item: bottom line */}
+      {isOver && !isDraggingThis && (
+        <div
+          className="absolute left-0 right-0 -bottom-1.5 h-0.5 rounded-full pointer-events-none opacity-0"
+          aria-hidden
+        />
+      )}
+      {void originalIndex}
+    </li>
+  );
+}
+
+function DragPreview({
+  docId,
+  originalIndex,
+  pageNumber,
+  revision,
+}: {
+  docId: string;
+  originalIndex: number;
+  pageNumber: number;
+  revision?: number;
+}) {
+  return (
+    <div
+      className="rounded-md overflow-hidden shadow-2xl"
+      style={{
+        outline: '2px solid var(--color-accent)',
+        background: '#fff',
+        cursor: 'grabbing',
+        // 살짝 기울여서 drag 중임을 강조
+        transform: 'rotate(-2deg) scale(1.04)',
+      }}
+    >
+      <img
+        src={thumbUrl(docId, pageNumber - 1, 220, revision ?? 0)}
+        alt={`dragging page ${pageNumber}`}
+        className="w-full h-auto block"
+        draggable={false}
+      />
+      <div
+        className="text-center text-[11px] py-1 font-semibold"
+        style={{ background: 'var(--color-accent)', color: '#fff' }}
+      >
+        페이지 {pageNumber}
+      </div>
+      {void originalIndex}
+    </div>
   );
 }
 
