@@ -16,12 +16,38 @@
  * 의존성: Node 22+ (built-in fetch).
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, stat } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const OUT_DIR = join(__dirname, '..', 'frontend', 'src', 'pdf', 'fonts', 'cid-mappings', 'data');
+
+// OUT_DIR 자동 감지:
+//   1) 환경변수 EDIT2ME_CMAP_OUT_DIR 가 있으면 그것
+//   2) ../frontend/src/pdf/fonts/cid-mappings/data  (repo 루트에서 실행)
+//   3) ../pdf/fonts/cid-mappings/data              (호스트 Dockerfile 안 — /app/scripts 에서)
+//   4) ./pdf/fonts/cid-mappings/data               (frontend/src 내부에서)
+async function resolveOutDir() {
+  if (process.env.EDIT2ME_CMAP_OUT_DIR) return process.env.EDIT2ME_CMAP_OUT_DIR;
+  const candidates = [
+    join(__dirname, '..', 'frontend', 'src', 'pdf', 'fonts', 'cid-mappings', 'data'),
+    join(__dirname, '..', 'pdf', 'fonts', 'cid-mappings', 'data'),
+    join(process.cwd(), 'pdf', 'fonts', 'cid-mappings', 'data'),
+  ];
+  for (const c of candidates) {
+    try {
+      // 부모(상위 디렉토리)가 존재하면 OK — data/ 자체는 없을 수 있음
+      await stat(dirname(c));
+      return c;
+    } catch {
+      /* 다음 후보 */
+    }
+  }
+  // fallback: 첫 번째 (생성 시도 시 부모도 mkdir -p 로 만들어짐)
+  return candidates[0];
+}
+
+const OUT_DIR = await resolveOutDir();
 
 // 각 ordering 의 UCS2 CMap raw 파일 URL (Adobe CMap resources GitHub mirror).
 const SOURCES = {
