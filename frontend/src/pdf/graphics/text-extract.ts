@@ -21,9 +21,17 @@ export interface TextRun {
   fontSize: number;
   isComposite: boolean;
   fullyDecoded: boolean;
+  /** 이 폰트로 새 텍스트를 인코딩 가능한지 (편집 가능성). encodeText 가 null 이면 false. */
+  fontEncodable: boolean;
   /** 원본 byte 시퀀스 (코드들 — 1바이트 폰트면 byte 배열 그대로). edit-text 의 advance 보정에 사용. */
   rawCodeBytes: Uint8Array;
-  source: { contentByteStart: number; contentByteEnd: number; opIndex: number };
+  source: {
+    contentByteStart: number;
+    contentByteEnd: number;
+    opIndex: number;
+    /** TJ array 안의 string 항목 index (Tj/'/" 는 항상 0). edit 시 segment 만 교체. */
+    tjSegmentIndex: number;
+  };
 }
 
 export interface TextExtractionResult {
@@ -106,7 +114,11 @@ export function extractTextFromPage(
     text: newTextState(),
   };
 
-  function processShow(opSource: ContentOpWithSource['source'], bytes: Uint8Array): void {
+  function processShow(
+    opSource: ContentOpWithSource['source'],
+    bytes: Uint8Array,
+    tjSegmentIndex = 0,
+  ): void {
     const ts = cur.text;
     const font = ts.Tf;
     if (!font || ts.Tfs === 0) return;
@@ -132,7 +144,7 @@ export function extractTextFromPage(
     }
     const final: Mat = multiply(cur.text.Tm, cur.CTM);
     runs.push({
-      blockId: `p${pageIndex}-op${opSource.opIndex}`,
+      blockId: `p${pageIndex}-op${opSource.opIndex}-${tjSegmentIndex}`,
       text,
       x: final[4]!,
       y: final[5]!,
@@ -143,11 +155,13 @@ export function extractTextFromPage(
       fontSize: ts.Tfs,
       isComposite: font.isComposite,
       fullyDecoded,
+      fontEncodable: !!font.encodeText,
       rawCodeBytes: new Uint8Array(bytes),
       source: {
         contentByteStart: opSource.start,
         contentByteEnd: opSource.end,
         opIndex: opSource.opIndex,
+        tjSegmentIndex,
       },
     });
     // vertical writing 모드면 (0, -advance) 로 이동, horizontal 이면 (advance, 0)
@@ -243,16 +257,19 @@ export function extractTextFromPage(
         break;
       }
       case 'TJ': {
+        // PDF spec § 9.4.3 순차 처리. 각 string segment 사이에 number shift 가 들어가면
+        // Tm 이 그만큼 이동 → 별개 위치의 텍스트가 됨. column-jump kerning (huge negative)
+        // 인 경우 각 segment 가 표의 다른 cell 일 가능성. 각 segment 를 *개별* TextRun 으로
+        // emit 해 cell 단위 편집 가능하게.
         const ts = cur.text;
         const font = ts.Tf;
         if (!font || ts.Tfs === 0) break;
-        const allBytes: number[] = [];
+        let segIdx = 0;
         for (const item of op.items) {
-          if (item.kind === 'bytes') for (const b of item.bytes) allBytes.push(b);
-        }
-        if (allBytes.length > 0) processShow(source, new Uint8Array(allBytes));
-        for (const item of op.items) {
-          if (item.kind === 'shift') {
+          if (item.kind === 'bytes') {
+            if (item.bytes.length > 0) processShow(source, item.bytes, segIdx);
+            segIdx += 1;
+          } else {
             const adv = (-item.v / 1000) * ts.Tfs * (ts.Tz / 100);
             cur.text.Tm = translate(cur.text.Tm, adv, 0);
           }

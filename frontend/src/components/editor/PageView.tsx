@@ -256,9 +256,7 @@ function TextBlockEditor({
   const height = Math.max(8, b.height * zoom);
   const cls = `text-block ${canEdit ? 'editable' : 'readonly'} ${isEditing ? 'editing' : ''}`;
   const title = !b.editable
-    ? b.isComposite
-      ? '복합 폰트 (CID-keyed) — v1에서 편집 불가'
-      : '디코드 불가 텍스트 — 편집 비활성화'
+    ? '이 텍스트는 편집할 수 없습니다 (폰트 인코딩 미지원 또는 디코드 실패)'
     : '더블클릭하여 편집';
   // Editing 중에만 텍스트 표시. 평소엔 클릭/hover 영역만 (SVG 가 visual 담당).
   return (

@@ -84,7 +84,9 @@ export async function GET(
         fontSize: r.fontSize,
         isComposite: r.isComposite,
         fullyDecoded: r.fullyDecoded,
-        editable: r.fullyDecoded && !r.isComposite,
+        // 편집 가능 = 완전히 디코드 + 폰트가 새 텍스트 인코딩 지원. composite 도 Identity
+        // CIDToGIDMap + 임베디드 TTF 면 인코딩 가능 (한글 등).
+        editable: r.fullyDecoded && r.fontEncodable,
       })),
       fontWarnings: result.fontDiagnostics
         .filter((f) => f.warnings.length > 0)

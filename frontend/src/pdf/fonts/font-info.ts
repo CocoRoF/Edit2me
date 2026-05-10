@@ -18,6 +18,7 @@ import { decodeStream } from '../core/stream';
 import { PdfDocument } from '../parser/document';
 import { CORE_14, isCore14, CoreFontMetrics } from './core14';
 import { parseToUnicodeCMap } from './cmap';
+import { parseTtf, type ParsedTtf } from './ttf-parser';
 import { CidMapLookup, getCidLookup } from './cid-mappings';
 import { buildGlyphOutlineCache, GlyphOutlineCache } from './ttf-glyph';
 
@@ -38,6 +39,19 @@ export interface FontInfo {
   unitsPerEm: number;
   /** code → SVG path d (font unit). null 이면 outline 사용 불가 — OS 폰트 fallback 권장. */
   glyphOutline: ((code: number) => string | null) | null;
+  /**
+   * 텍스트 편집용. Unicode 문자열을 이 폰트로 그릴 수 있는 *PDF byte 시퀀스* 로 인코딩.
+   * 인코딩 실패 (글리프 없음 / unsupported encoding) 시 null + missing 항목 반환.
+   *
+   * - simple 폰트: 1 byte/char (latin1 / WinAnsi 근사). 0x20..0xff 만 통과.
+   * - composite Type0 + Identity CIDToGIDMap: Unicode → TTF cmap 의 GID → 2-byte BE.
+   *   비-identity CIDToGIDMap 은 GID→CID reverse 가 필요해 미지원 (null).
+   *
+   * 반환 advance: 1/1000 em 단위 누적 합 (Tfs 곱하기 전 단계). 호출자가 Tfs 곱해 user-space 로.
+   */
+  encodeText:
+    | ((text: string) => { bytes: Uint8Array; advance1000: number; missing: string[] } | null)
+    | null;
   ascent: number;
   descent: number;
   dict: PdfDict;
@@ -128,6 +142,12 @@ export function buildFontInfo(
   let unitsPerEm = 1000;
   // CID → GID 매핑. null 이면 identity (GID = CID).
   let cidToGid: ((cid: number) => number) | null = null;
+  // Composite 폰트 + Identity CIDToGIDMap 인 경우, Unicode → CID(=GID) 역매핑.
+  // 편집(encodeText) 에 사용. parseTtf 는 비싸서 doc-level WeakMap 캐시.
+  let parsedTtf: ParsedTtf | null = null;
+  // 비-Identity CIDToGIDMap (cidToGid !== null) 이면 GID→CID reverse map 이 필요한데
+  // 현재 미구현 → encodeText 에서 null 반환하도록 표식.
+  let cidToGidIsIdentity = true;
   if (isComposite) {
     const descendants = dictGet(fontDict, 'DescendantFonts');
     if (descendants && isArray(descendants)) {
@@ -181,6 +201,8 @@ export function buildFontInfo(
                     const ttfBytes = ttfBytesCached(doc, ff2Res);
                     outlineCache = buildGlyphOutlineCache(ttfBytes);
                     unitsPerEm = extractUnitsPerEm(ttfBytes) ?? 1000;
+                    // unicodeToGid (편집 인코딩) — parseTtf 는 비싸므로 stream identity 로 캐시.
+                    parsedTtf = parseTtfCached(doc, ff2Res, ttfBytes);
                   } catch {
                     /* ignore */
                   }
@@ -203,6 +225,7 @@ export function buildFontInfo(
                   if (off + 1 >= bytes.length) return 0;
                   return (bytes[off]! << 8) | bytes[off + 1]!;
                 };
+                cidToGidIsIdentity = false;
               } catch {
                 /* ignore — fall through to identity */
               }
@@ -308,6 +331,59 @@ export function buildFontInfo(
     );
   }
 
+  // ---- encodeText: 편집 인코딩 ----
+  function widthOfCode(code: number): number {
+    const w = widthMap.get(code);
+    if (w !== undefined) return w;
+    return defaultWidth;
+  }
+  let encodeText: FontInfo['encodeText'] = null;
+  if (isComposite && parsedTtf && cidToGidIsIdentity) {
+    // Type0 + Identity CIDToGIDMap: Unicode → GID (= CID) → 2-byte BE.
+    encodeText = (text: string) => {
+      const bytes: number[] = [];
+      let advance1000 = 0;
+      const missing: string[] = [];
+      // Iterate by code points (handle surrogate pairs).
+      for (const ch of text) {
+        const cp = ch.codePointAt(0)!;
+        const gid = parsedTtf!.unicodeToGid.get(cp);
+        if (gid === undefined || gid === 0) {
+          missing.push(ch);
+          continue;
+        }
+        bytes.push((gid >> 8) & 0xff, gid & 0xff);
+        // CID = GID 인 경우 widthOf(CID) 를 사용. W array 에 등재 안 됐으면 default.
+        advance1000 += widthOfCode(gid);
+      }
+      return { bytes: new Uint8Array(bytes), advance1000, missing };
+    };
+  } else if (!isComposite) {
+    // Simple 폰트 (Type1 / 단일 byte TTF): WinAnsi/Latin1 근사. Korean / non-Latin1 거부.
+    encodeText = (text: string) => {
+      const bytes: number[] = [];
+      let advance1000 = 0;
+      const missing: string[] = [];
+      for (const ch of text) {
+        const cp = ch.codePointAt(0)!;
+        if (cp > 0xff) {
+          missing.push(ch);
+          continue;
+        }
+        // 0x80..0x9F 는 WinAnsi 와 Unicode 가 다름 — 안전하게 거부.
+        if (cp >= 0x80 && cp < 0xa0) {
+          missing.push(ch);
+          continue;
+        }
+        bytes.push(cp);
+        advance1000 += widthOfCode(cp);
+      }
+      return { bytes: new Uint8Array(bytes), advance1000, missing };
+    };
+  }
+  // composite + non-identity CIDToGIDMap 또는 parsedTtf 부재 → encodeText = null
+  // (UI 가 edit 비활성화)
+
   return {
     resourceName,
     baseName,
@@ -315,11 +391,7 @@ export function buildFontInfo(
     isComposite,
     decodeBytes,
     toUnicode: toUnicodeFn,
-    widthOf(code: number) {
-      const w = widthMap.get(code);
-      if (w !== undefined) return w;
-      return defaultWidth;
-    },
+    widthOf: widthOfCode,
     writingMode,
     unitsPerEm,
     glyphOutline: outlineCache
@@ -333,6 +405,7 @@ export function buildFontInfo(
           return path === '' ? null : path;
         }
       : null,
+    encodeText,
     ascent: coreMetrics?.ascent ?? 700,
     descent: coreMetrics?.descent ?? -200,
     dict: fontDict,
@@ -343,6 +416,27 @@ export function buildFontInfo(
       (!isComposite && (isCore || encoding !== undefined)),
   };
 }
+
+/**
+ * doc-level 캐시. parseTtf 는 cmap 등 여러 table 을 파싱해 비싸므로 stream identity 로
+ * 한 번만 수행.
+ */
+function parseTtfCached(
+  doc: PdfDocument,
+  stream: import('../core/object').PdfStream,
+  ttfBytes: Uint8Array,
+): ParsedTtf {
+  const key = { __parsed: stream }; // stream 자체를 key 로 쓰면 ttfBytesCached 와 충돌 → 별 객체.
+  // 실제로는 stream 객체에 직접 다른 속성으로 저장해 두는 게 더 효율. 단순화: WeakMap 사용.
+  const cached = parsedTtfCache.get(stream);
+  if (cached) return cached;
+  void key;
+  const parsed = parseTtf(ttfBytes);
+  parsedTtfCache.set(stream, parsed);
+  return parsed;
+}
+// 모듈 레벨 캐시 — 동일 stream 객체 (=동일 doc 안에서 같은 폰트) 참조 시 재사용.
+const parsedTtfCache = new WeakMap<object, ParsedTtf>();
 
 // ---- helpers ----
 

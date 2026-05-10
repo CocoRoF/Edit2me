@@ -32,6 +32,7 @@ import { PdfDocument } from '../parser/document';
 import { decodeStream } from '../core/stream';
 import { extractTextFromPage } from '../graphics/text-extract';
 import { buildFontMap } from '../fonts/font-info';
+import { parseContent } from '../graphics/content-stream';
 
 export interface EditTextSpec {
   pageIndex: number;
@@ -54,69 +55,110 @@ export function editText(doc: PdfDocument, spec: EditTextSpec): void {
   const target = result.runs.find((r) => r.blockId === spec.blockId);
   if (!target) throw new EditTextError('Block not found', 'block-not-found');
 
-  // 폰트 정보 — 단순 1바이트만 지원
+  // 폰트 정보 — encodeText 가 지원되는 폰트만 편집 가능 (simple Latin / composite Identity-H).
   const fonts = buildFontMap(doc, page.dict);
   const font = fonts.get(target.fontName);
   if (!font) throw new EditTextError('Font not found', 'font-not-found');
-  if (font.isComposite) {
+  if (!font.encodeText) {
     throw new EditTextError(
-      'Composite (CID-keyed) font editing is not supported in v1',
+      font.isComposite
+        ? 'Composite font without Identity CIDToGIDMap or embedded TrueType — editing not supported'
+        : 'Simple font with unsupported encoding',
       'unsupported-font',
     );
   }
 
-  // 새 텍스트를 byte로 인코딩 (latin1로 단순화 — WinAnsiEncoding 근사)
-  const newBytes: number[] = [];
-  for (let i = 0; i < spec.newText.length; i += 1) {
-    const c = spec.newText.charCodeAt(i);
-    if (c <= 0xff) {
-      newBytes.push(c);
-    } else {
-      throw new EditTextError(
-        `Character '${spec.newText[i]}' (U+${c.toString(16)}) is not encodable in this font`,
-        'glyph-missing',
-      );
-    }
+  // 새 텍스트를 폰트 byte 시퀀스로 인코딩
+  const enc = font.encodeText(spec.newText);
+  if (!enc) {
+    throw new EditTextError('Font cannot encode new text', 'unsupported-font');
   }
+  if (enc.missing.length > 0) {
+    throw new EditTextError(
+      `Font is missing glyph(s) for: ${enc.missing.slice(0, 5).join(', ')}${enc.missing.length > 5 ? '…' : ''}`,
+      'glyph-missing',
+    );
+  }
+  const newBytes = Array.from(enc.bytes);
 
-  // Advance 보정: 원본 op이 만들었던 text matrix 이동량과 새 op이 만들 이동량의
-  // 차이만큼 Td 로 보정해, 같은 줄의 후속 텍스트 위치 보존.
-  // 단위: text space (Td 와 동일).
+  // Advance 보정: 원본 op 의 advance 와 새 op advance 차이를 Td 로 보정.
   const fontSize = target.fontSize;
-  let oldAdvance = 0;
-  for (const code of target.rawCodeBytes) {
-    oldAdvance += (font.widthOf(code) / 1000) * fontSize;
-  }
-  let newAdvance = 0;
-  for (const code of newBytes) {
-    newAdvance += (font.widthOf(code) / 1000) * fontSize;
-  }
+  // composite 면 raw bytes 는 2 byte 씩 (decodeBytes 가 정확히 처리). simple 은 1 byte.
+  const decodedOld = font.decodeBytes(target.rawCodeBytes);
+  let oldAdvance1000 = 0;
+  for (const code of decodedOld.codes) oldAdvance1000 += font.widthOf(code);
+  const oldAdvance = (oldAdvance1000 / 1000) * fontSize;
+  const newAdvance = (enc.advance1000 / 1000) * fontSize;
   const advanceDelta = oldAdvance - newAdvance;
 
-  let opStr = `(${escapeLiteralBytes(new Uint8Array(newBytes))}) Tj`;
-  if (Math.abs(advanceDelta) > 0.001) {
-    // Td <delta> 0 — text matrix 와 line matrix 둘 다 이동.
-    // 그러나 다음 텍스트가 line의 시작점부터 새로 그릴 수도 있으므로
-    // text matrix만 보정하는 건 어렵다. 가장 호환성 좋은 방법은 정확히 같은
-    // 만큼 text matrix를 평행이동하는 cm 식이지만 BT/ET 안에선 cm 사용 불가.
-    // → 다음 토큰이 자기 위치를 절대 지정 (Tm) 한다면 우리 보정은 무시되고 OK.
-    //   상대 이동 (Td/T*) 하면 우리 보정이 더해져 시각적 일관 유지.
-    opStr += ` ${advanceDelta.toFixed(3)} 0 Td`;
-  }
-  const newOpBytes = new TextEncoder().encode(opStr + '\n');
+  // composite 폰트는 hex string `<HHHH>`, simple 은 literal `(...)` 사용.
+  const literal = font.isComposite
+    ? `<${hexEncode(new Uint8Array(newBytes))}>`
+    : `(${escapeLiteralBytes(new Uint8Array(newBytes))})`;
 
-  // 콘텐츠 stream을 *디코드한 byte*에서 해당 op 위치를 찾아 교체.
-  // 우리는 페이지의 모든 콘텐츠를 단일 byte로 합쳐 작업한 뒤,
-  // 새 단일 stream으로 갱신.
+  // op 의 종류에 따라 교체 전략이 달라짐.
+  //   - Tj / ' / " : op 전체를 새 Tj 한 줄로 교체 + advance 보정 Td.
+  //   - TJ + 단일 segment : 동일하게 Tj 로 단순 교체.
+  //   - TJ + 다중 segment : segment 만 교체. 그 segment 의 advance delta 를 trailing
+  //     shift 항목에 흡수시켜 다음 segment 들의 위치를 *완벽히* 보존.
   const contentBytes = doc.pageContent(page.dict);
   const start = target.source.contentByteStart;
   const end = target.source.contentByteEnd;
   if (start < 0 || end > contentBytes.length || start > end) {
     throw new EditTextError('Bad block source range', 'bad-range');
   }
-  // 새 op는 같은 텍스트 매트릭스에서 시작해야 같은 위치에 표시됨.
-  // 단순화: 기존 op (Tj/TJ/'/")가 있던 자리를 *새 Tj 한 줄*로 교체.
-  // 단, 'TJ' 의 경우 advance 가 달라 다음 op들이 시각적으로 어긋날 수 있음 (감수).
+
+  // 원본 op 을 다시 파싱 — TJ segment 정보를 얻기 위해.
+  const reparsed = parseContent(contentBytes);
+  const targetOp = reparsed[target.source.opIndex]?.op;
+
+  let newOpStr: string;
+  if (targetOp && targetOp.op === 'TJ' && countBytesItems(targetOp.items) > 1) {
+    // 다중 segment TJ. 새 array 를 빌드.
+    const segIdx = target.source.tjSegmentIndex;
+    let bytesIdxSeen = 0;
+    const newItems: string[] = [];
+    for (let i = 0; i < targetOp.items.length; i += 1) {
+      const it = targetOp.items[i]!;
+      if (it.kind === 'bytes') {
+        if (bytesIdxSeen === segIdx) {
+          newItems.push(literal);
+          // advance 보정을 다음 shift (있으면) 에 흡수, 없으면 새 shift 삽입.
+          // delta 단위: text-space (1/1000 em). user-space delta = advanceDelta (이미 Tfs 곱).
+          // shift unit 은 1000 / Tfs * delta_user_space.
+          const shiftDelta1000 = (advanceDelta * 1000) / fontSize;
+          const next = targetOp.items[i + 1];
+          if (next && next.kind === 'shift') {
+            // shift 의 부호 의미: positive = backward (왼쪽). delta 가 양수 (old > new) 면
+            // 다음 segment 가 *더 멀리* 가야 하니 shift 를 더 negative 로 (음수 더해짐) → -delta 더함.
+            (next as { kind: 'shift'; v: number }).v += -shiftDelta1000;
+          } else if (Math.abs(shiftDelta1000) > 0.5) {
+            // 새 shift 삽입 — items 배열 직접 변경 (다음 loop 에서 emit 됨).
+            targetOp.items.splice(i + 1, 0, { kind: 'shift', v: -shiftDelta1000 });
+          }
+        } else {
+          // 기존 bytes 그대로 보존.
+          if (font.isComposite) {
+            newItems.push(`<${hexEncode(it.bytes)}>`);
+          } else {
+            newItems.push(`(${escapeLiteralBytes(it.bytes)})`);
+          }
+        }
+        bytesIdxSeen += 1;
+      } else {
+        newItems.push(formatNumber(it.v));
+      }
+    }
+    newOpStr = `[${newItems.join('')}] TJ`;
+  } else {
+    // 단일 segment 또는 Tj/'/". 전체 op 을 Tj 한 줄로 교체.
+    newOpStr = `${literal} Tj`;
+    if (Math.abs(advanceDelta) > 0.001) {
+      // Td 보정 — 다음 op 가 Tm 으로 절대 위치 지정하면 무시됨, Td/T* 면 더해짐.
+      newOpStr += ` ${advanceDelta.toFixed(3)} 0 Td`;
+    }
+  }
+  const newOpBytes = new TextEncoder().encode(newOpStr + '\n');
   const before = contentBytes.subarray(0, start);
   const after = contentBytes.subarray(end);
   const merged = new Uint8Array(before.length + newOpBytes.length + after.length);
@@ -138,6 +180,27 @@ export function editText(doc: PdfDocument, spec: EditTextSpec): void {
   const pageDict = cloneObject(page.dict) as PdfDict;
   dictSet(pageDict, 'Contents', newRef);
   doc.markDirty(page.ref.num, page.ref.gen, pageDict);
+}
+
+function hexEncode(bytes: Uint8Array): string {
+  let out = '';
+  for (const b of bytes) out += b.toString(16).padStart(2, '0');
+  return out;
+}
+
+function countBytesItems(items: Array<{ kind: 'bytes' } | { kind: 'shift' }>): number {
+  let n = 0;
+  for (const it of items) if (it.kind === 'bytes') n += 1;
+  return n;
+}
+
+function formatNumber(v: number): string {
+  if (Number.isInteger(v)) return ` ${v}`;
+  // PDF spec § 7.3.3: number — fixed point 충분 (Td, TJ shift 모두 정수 또는 fixed).
+  // 소수 4자리 + trailing zero 제거.
+  let s = v.toFixed(4);
+  if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  return ` ${s}`;
 }
 
 function escapeLiteralBytes(bytes: Uint8Array): string {
