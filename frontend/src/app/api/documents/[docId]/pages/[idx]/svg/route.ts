@@ -1,7 +1,7 @@
-// 페이지 → SVG 렌더링 endpoint.
-// 결과는 entry.svgCache 에 (revision, pageIndex) 키로 캐시됨.
+// 페이지 → SVG. 결과는 entry.svgCache 에 (revision, pageIndex) 키로 캐시.
+// 에러 시 인라인 placeholder SVG 반환 (200) — 사용자 화면이 갑자기 깨지지 않게.
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { getDoc } from '@/lib/doc-cache';
 import { renderPageSvg } from '@/pdf/render/svg-renderer';
 
@@ -20,24 +20,23 @@ export async function GET(
   const page = pages[pageIndex];
   if (!page) return new Response('page not found', { status: 404 });
 
-  // 서버 사이드 캐시 (revision 단위)
   const cacheKey = `${entry.revision}:${pageIndex}`;
   let svg = entry.svgCache.get(cacheKey);
   if (!svg) {
     try {
-      const r = renderPageSvg(entry.doc, page.dict, pageIndex);
-      svg = r.svg;
+      svg = renderPageSvg(entry.doc, page.dict, pageIndex).svg;
       entry.svgCache.set(cacheKey, svg);
-      // 메모리 보호: 페이지당 최대 ~256 entries 유지
       if (entry.svgCache.size > 256) {
         const oldest = entry.svgCache.keys().next().value;
         if (oldest) entry.svgCache.delete(oldest);
       }
     } catch (e) {
-      return new Response(`render failed: ${(e as Error).message}`, { status: 500 });
+      const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);
+      const w = urx - llx;
+      const h = ury - lly;
+      svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="#fef3c7"/><text x="50%" y="50%" text-anchor="middle" font-size="${Math.min(w, h) / 24}" fill="#92400e">page ${pageIndex + 1} render failed: ${(e as Error).message.slice(0, 100)}</text></svg>`;
     }
   }
-
   return new Response(svg, {
     status: 200,
     headers: {
