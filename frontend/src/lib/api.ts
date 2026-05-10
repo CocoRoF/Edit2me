@@ -64,6 +64,40 @@ export interface PageText {
   fontWarnings: FontWarning[];
 }
 
+// ---- 클라이언트 in-memory cache (E2) ----
+// 같은 docId+revision 으로 반복 요청 시 즉시 응답. 새 op 으로 revision 이 바뀌면 자연 invalidation.
+
+interface CacheEntry<T> {
+  value: T;
+  expires: number;
+}
+const memCache = new Map<string, CacheEntry<unknown>>();
+const CACHE_TTL = 60_000; // 1분
+
+function cacheGet<T>(key: string): T | null {
+  const e = memCache.get(key);
+  if (!e) return null;
+  if (Date.now() > e.expires) {
+    memCache.delete(key);
+    return null;
+  }
+  return e.value as T;
+}
+function cacheSet<T>(key: string, value: T): void {
+  memCache.set(key, { value, expires: Date.now() + CACHE_TTL });
+  if (memCache.size > 64) {
+    const oldest = memCache.keys().next().value;
+    if (oldest) memCache.delete(oldest);
+  }
+}
+
+/** 명시적 invalidation — op 실행 후 호출. */
+export function invalidateDocCache(docId: string): void {
+  for (const k of memCache.keys()) {
+    if (k.startsWith(`${docId}|`)) memCache.delete(k);
+  }
+}
+
 export async function uploadPdf(file: File): Promise<DocumentMeta> {
   const fd = new FormData();
   fd.append('file', file);
@@ -79,9 +113,14 @@ export async function uploadPdf(file: File): Promise<DocumentMeta> {
 }
 
 export async function getDocument(docId: string): Promise<DocumentMeta> {
+  const cacheKey = `${docId}|getDocument`;
+  const cached = cacheGet<DocumentMeta>(cacheKey);
+  if (cached) return cached;
   const res = await fetch(apiUrl(`/api/documents/${docId}`));
   if (!res.ok) throw new Error(`Failed to load doc (${res.status})`);
-  return (await res.json()) as DocumentMeta;
+  const data = (await res.json()) as DocumentMeta;
+  cacheSet(cacheKey, data);
+  return data;
 }
 
 export async function getPageText(docId: string, idx: number): Promise<PageText> {
@@ -120,18 +159,21 @@ export async function applyOps(
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.error?.message || `Op failed (${res.status})`);
   }
+  invalidateDocCache(docId);
   return (await res.json()) as OpResult;
 }
 
 export async function undoOp(docId: string): Promise<OpResult> {
   const res = await fetch(apiUrl(`/api/documents/${docId}/undo`), { method: 'POST' });
   if (!res.ok) throw new Error(`Undo failed (${res.status})`);
+  invalidateDocCache(docId);
   return (await res.json()) as OpResult;
 }
 
 export async function redoOp(docId: string): Promise<OpResult> {
   const res = await fetch(apiUrl(`/api/documents/${docId}/redo`), { method: 'POST' });
   if (!res.ok) throw new Error(`Redo failed (${res.status})`);
+  invalidateDocCache(docId);
   return (await res.json()) as OpResult;
 }
 
