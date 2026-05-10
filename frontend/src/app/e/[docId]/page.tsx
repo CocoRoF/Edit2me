@@ -401,7 +401,6 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
           onActivate={setActive}
           onReorder={handleReorder}
           onDelete={handleDelete}
-          onRotate={handleRotate}
           reload={reload}
           revision={meta.revision}
         />
@@ -414,7 +413,6 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
           onActivate={setActive}
           onReorder={handleReorder}
           onDelete={handleDelete}
-          onRotate={handleRotate}
           reload={reload}
           revision={meta.revision}
           mobile={{ open: mobileSidebarOpen, onClose: () => setMobileSidebarOpen(false) }}
@@ -441,6 +439,9 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
                 onCanvasClick={addTextMode ? handleCanvasClick : undefined}
                 addTextMode={addTextMode && p.index === activeIndex}
                 active={p.index === activeIndex}
+                selected={selected.has(i)}
+                onRotate={(angle) => handleRotate([i], angle)}
+                onDelete={() => handleDelete([i])}
               />
             ))
           )}
