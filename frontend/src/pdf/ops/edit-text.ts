@@ -68,22 +68,45 @@ export function editText(doc: PdfDocument, spec: EditTextSpec): void {
     );
   }
 
-  // 새 텍스트를 폰트 byte 시퀀스로 인코딩
-  const enc = font.encodeText(spec.newText);
+  // 새 텍스트를 폰트 byte 시퀀스로 인코딩.
+  // 우선 target 폰트로 시도 → missing 글리프 있으면 같은 페이지의 다른 폰트들 중에서
+  // 모든 글자를 인코딩할 수 있는 폰트를 fallback 으로 사용. 사용자가 외부 폰트를 업로드
+  // 하지 않아도 PDF 가 이미 가지고 있는 폰트만으로 가능한 한 많이 편집되도록.
+  let enc = font.encodeText(spec.newText);
   if (!enc) {
     throw new EditTextError('Font cannot encode new text', 'unsupported-font');
   }
+  let useFont = font;
   if (enc.missing.length > 0) {
-    throw new EditTextError(
-      `Font is missing glyph(s) for: ${enc.missing.slice(0, 5).join(', ')}${enc.missing.length > 5 ? '…' : ''}`,
-      'glyph-missing',
-    );
+    // 페이지의 다른 encodable 폰트 중 모든 글자 인코딩 가능한 것 찾기.
+    let bestFont: typeof font | null = null;
+    let bestEnc: typeof enc | null = null;
+    for (const [name, f] of fonts) {
+      if (name === target.fontName || !f.encodeText) continue;
+      const e = f.encodeText(spec.newText);
+      if (!e) continue;
+      if (e.missing.length === 0) {
+        bestFont = f;
+        bestEnc = e;
+        break;
+      }
+      // 차선: missing 가장 적은 것 (전부 인코딩 못 해도 부분 fallback 보다는 fail 이 안전).
+    }
+    if (bestFont && bestEnc) {
+      useFont = bestFont;
+      enc = bestEnc;
+    } else {
+      throw new EditTextError(
+        `Font is missing glyph(s) for: ${enc.missing.slice(0, 5).join(', ')}${enc.missing.length > 5 ? '…' : ''}`,
+        'glyph-missing',
+      );
+    }
   }
   const newBytes = Array.from(enc.bytes);
 
   // Advance 보정: 원본 op 의 advance 와 새 op advance 차이를 Td 로 보정.
   const fontSize = target.fontSize;
-  // composite 면 raw bytes 는 2 byte 씩 (decodeBytes 가 정확히 처리). simple 은 1 byte.
+  // 원본 advance 는 원본 폰트로 계산. 새 advance 는 useFont 로 계산 (fallback 시 다름).
   const decodedOld = font.decodeBytes(target.rawCodeBytes);
   let oldAdvance1000 = 0;
   for (const code of decodedOld.codes) oldAdvance1000 += font.widthOf(code);
@@ -92,9 +115,14 @@ export function editText(doc: PdfDocument, spec: EditTextSpec): void {
   const advanceDelta = oldAdvance - newAdvance;
 
   // composite 폰트는 hex string `<HHHH>`, simple 은 literal `(...)` 사용.
-  const literal = font.isComposite
+  const literal = useFont.isComposite
     ? `<${hexEncode(new Uint8Array(newBytes))}>`
     : `(${escapeLiteralBytes(new Uint8Array(newBytes))})`;
+  // fallback 폰트면 Tf 로 폰트 전환 op 을 prefix 로 추가. Tfs 는 원본 fontSize 그대로.
+  const fontPrefix =
+    useFont.resourceName !== target.fontName
+      ? `/${useFont.resourceName} ${formatFontSize(fontSize)} Tf `
+      : '';
 
   // op 의 종류에 따라 교체 전략이 달라짐.
   //   - Tj / ' / " : op 전체를 새 Tj 한 줄로 교체 + advance 보정 Td.
@@ -149,10 +177,21 @@ export function editText(doc: PdfDocument, spec: EditTextSpec): void {
         newItems.push(formatNumber(it.v));
       }
     }
+    // fallback 폰트 사용 시 prefix 로 Tf 삽입. multi-segment 인 경우 segment 만 다른 폰트로
+    // 그리고 다음 segment 부터는 원래 폰트로 돌아가야 정확한데, 단순화: 이번 작업에선
+    // fallback 시에는 multi-segment TJ 도 단일 Tj 로 수렴 (다른 segment 는 그대로 hex 바이트로
+    // 보존되지만 중간에 폰트 전환 op 가 들어가면 그 뒤 segment 는 fallback 폰트로 그려짐.
+    // → multi-segment + fallback 은 일단 거부하는 게 안전).
+    if (fontPrefix) {
+      throw new EditTextError(
+        'Font fallback in multi-segment TJ is not supported in this version. Try editing one cell at a time.',
+        'unsupported-multi-segment-fallback',
+      );
+    }
     newOpStr = `[${newItems.join('')}] TJ`;
   } else {
-    // 단일 segment 또는 Tj/'/". 전체 op 을 Tj 한 줄로 교체.
-    newOpStr = `${literal} Tj`;
+    // 단일 segment 또는 Tj/'/". 전체 op 을 Tj 한 줄로 교체. fontPrefix 가 있으면 Tf prepend.
+    newOpStr = `${fontPrefix}${literal} Tj`;
     if (Math.abs(advanceDelta) > 0.001) {
       // Td 보정 — 다음 op 가 Tm 으로 절대 위치 지정하면 무시됨, Td/T* 면 더해짐.
       newOpStr += ` ${advanceDelta.toFixed(3)} 0 Td`;
@@ -192,6 +231,14 @@ function countBytesItems(items: Array<{ kind: 'bytes' } | { kind: 'shift' }>): n
   let n = 0;
   for (const it of items) if (it.kind === 'bytes') n += 1;
   return n;
+}
+
+function formatFontSize(v: number): string {
+  // Tf 의 size 인자 — PDF 는 정수/소수 모두 허용.
+  if (Number.isInteger(v)) return String(v);
+  let s = v.toFixed(4);
+  if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  return s;
 }
 
 function formatNumber(v: number): string {

@@ -44,6 +44,17 @@ export interface EditTextOp {
   newText: string;
 }
 
+/**
+ * 인접한 TextRun 들을 하나로 묶어 동시에 편집. blockIds 는 같은 op (TJ) 안의 연속
+ * segment 들이어야 함. 서버는 그 segment 들을 하나로 합쳐 교체.
+ */
+export interface EditTextGroupOp {
+  op: 'edit-text-group';
+  pageIndex: number;
+  blockIds: string[];
+  newText: string;
+}
+
 export interface RotatePagesOp {
   op: 'rotate-pages';
   indices: number[];
@@ -55,4 +66,5 @@ export type Op =
   | ReorderPagesOp
   | AddTextOp
   | EditTextOp
+  | EditTextGroupOp
   | RotatePagesOp;

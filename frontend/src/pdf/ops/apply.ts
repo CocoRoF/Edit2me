@@ -6,6 +6,7 @@ import { deletePages } from './delete-pages';
 import { reorderPages, rotatePages } from './reorder-pages';
 import { addText } from './add-text';
 import { editText } from './edit-text';
+import { editTextGroup } from './edit-text-group';
 import { ParsedTtf } from '../fonts/ttf-parser';
 
 export interface ApplyResult {
@@ -63,6 +64,14 @@ export function applyOps(doc: PdfDocument, ops: Op[], ctx: ApplyContext = {}): A
         editText(doc, {
           pageIndex: op.pageIndex,
           blockId: op.blockId,
+          newText: op.newText,
+        });
+        affected.add(op.pageIndex);
+        break;
+      case 'edit-text-group':
+        editTextGroup(doc, {
+          pageIndex: op.pageIndex,
+          blockIds: op.blockIds,
           newText: op.newText,
         });
         affected.add(op.pageIndex);

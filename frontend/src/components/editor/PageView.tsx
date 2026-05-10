@@ -16,7 +16,8 @@ interface Props {
   displayIndex: number;
   /** 총 페이지 수 — 라벨에 "n / m" 표기 */
   totalPages: number;
-  onEditText?: (blockId: string, newText: string) => void;
+  /** group 편집 시 모든 underlying segment id 들을 받음. */
+  onEditText?: (blockIds: string[], newText: string) => void;
   onCanvasClick?: (pageIndex: number, x: number, y: number) => void;
   addTextMode?: boolean;
   active?: boolean;
@@ -216,7 +217,7 @@ export function PageView({
             }}
             onCommit={(newText) => {
               setEditingId(null);
-              if (newText !== b.text && onEditText) onEditText(b.blockId, newText);
+              if (newText !== b.text && onEditText) onEditText(b.blockIds, newText);
             }}
             onCancel={() => setEditingId(null)}
           />
