@@ -68,11 +68,33 @@ export function PageView({
       }}
       onDoubleClick={(e) => {
         if (!addTextMode || !onCanvasClick) return;
+        // 회전 보정: 화면 click → PDF MediaBox 좌표 (D4 fix).
+        // getBoundingClientRect는 *시각적* (rotation 후) bbox를 돌려줌.
+        // PDF 좌표는 좌하 원점, y는 위로, MediaBox 회전 전 기준.
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-        const cx = e.clientX - rect.left;
-        const cy = e.clientY - rect.top;
-        const x = cx / zoom;
-        const y = page.height - cy / zoom;
+        const cx = (e.clientX - rect.left) / zoom; // [0, Vw/zoom]
+        const cy = (e.clientY - rect.top) / zoom; // [0, Vh/zoom]
+        const W = page.width;
+        const H = page.height;
+        let x: number;
+        let y: number;
+        switch (rotate) {
+          case 90:
+            x = cy;
+            y = cx;
+            break;
+          case 180:
+            x = W - cx;
+            y = cy;
+            break;
+          case 270:
+            x = W - cy;
+            y = H - cx;
+            break;
+          default:
+            x = cx;
+            y = H - cy;
+        }
         onCanvasClick(page.index, x, y);
       }}
     >
