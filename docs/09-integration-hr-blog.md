@@ -73,14 +73,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ARG EDIT2ME_REPO=https://github.com/CocoRoF/Edit2me.git
 ARG EDIT2ME_REF=main
+# CMap 데이터 다운로드 여부 (1 이면 build:cmaps 실행 → Adobe-Korea1/Japan1/GB1/CNS1 fetch).
+# CJK PDF (특히 ToUnicode 부재) 가독성에 결정적. 첫 빌드에 +20초 정도.
+ARG EDIT2ME_BUILD_CMAPS=1
 
 WORKDIR /app
 
 RUN git clone --depth 1 --branch "${EDIT2ME_REF}" "${EDIT2ME_REPO}" /tmp/edit2me \
  && cp -r /tmp/edit2me/frontend/src/. /app/ \
+ && mkdir -p /app/scripts \
+ && cp /tmp/edit2me/scripts/build-cmaps.mjs /app/scripts/ 2>/dev/null || true \
  && rm -rf /tmp/edit2me
 
 RUN npm install --no-audit --no-fund
+
+# CJK CMap 데이터 fetch (선택). build-cmaps.mjs 가 작성하는 경로는
+# pdf/fonts/cid-mappings/data/*.json 이고 registry.ts 가 자동으로 읽는다.
+RUN if [ "${EDIT2ME_BUILD_CMAPS}" = "1" ]; then \
+        node scripts/build-cmaps.mjs || echo "[edit2me] build:cmaps failed (non-fatal — Adobe CMap servers may be unreachable)"; \
+    fi
+
 RUN npm run build
 
 EXPOSE 3000
@@ -88,6 +100,8 @@ CMD ["npm", "run", "start"]
 ```
 
 `hr_blog2.0/edit2me/Dockerfile.dev` 는 위와 동일하되 `npm run build` 생략, `CMD ["npm", "run", "dev"]`.
+
+> **build-cmaps 의 데이터 경로**: 스크립트는 repo 의 `frontend/src/pdf/fonts/cid-mappings/data/` 에 JSON 을 쓴다. Dockerfile 에서는 `/app` (= 그 자리) 에 결과가 떨어지므로 별도 복사 불필요.
 
 ### 새 commit 반영 / 버전 박기
 
