@@ -11,6 +11,10 @@ interface Props {
   pageText: PageText | null;
   zoom: number;
   revision: number;
+  /** 1-based 표시용 페이지 번호 (배열 위치) */
+  displayIndex: number;
+  /** 총 페이지 수 — 라벨에 "n / m" 표기 */
+  totalPages: number;
   onEditText?: (blockId: string, newText: string) => void;
   onCanvasClick?: (pageIndex: number, x: number, y: number) => void;
   addTextMode?: boolean;
@@ -23,6 +27,8 @@ export function PageView({
   pageText,
   zoom,
   revision,
+  displayIndex,
+  totalPages,
   onEditText,
   onCanvasClick,
   addTextMode,
@@ -44,16 +50,36 @@ export function PageView({
   return (
     <div
       ref={ref}
-      // shrink-0: 부모가 flex-col 이라 default flex-shrink:1 이면 모든 페이지 합산 높이가
-      // 부모보다 클 때 균등 축소되어 zoom 을 키워도 height 가 거의 안 자라는 증상이 생김
-      // (예: z=2.5 에서 4 페이지 × 2105px = 8420px > 부모 ≈ 1100px → 각 ~275px 로 짜부됨).
-      // overflow-auto 가 부모에 있어도 shrink 가 먼저 적용됨. 명시적으로 0 으로 막는다.
-      className="relative paper shrink-0"
+      // 외곽 wrapper: 페이지 라벨 + paper. shrink-0 (zoom 시 height 짜부 방지).
+      className="flex flex-col items-center gap-2 shrink-0"
+      style={{ width: w }}
+    >
+      {/* 페이지 구분 라벨 — accent dot + "페이지 N / 총 M". active 페이지면 강조. */}
+      <div
+        className="flex items-center gap-2 text-xs select-none"
+        style={{ color: active ? 'var(--color-accent)' : 'var(--color-muted)' }}
+      >
+        <span
+          className="inline-block w-1.5 h-1.5 rounded-full"
+          style={{
+            background: active ? 'var(--color-accent)' : 'var(--color-line-strong)',
+          }}
+        />
+        <span style={{ fontWeight: active ? 600 : 500 }}>
+          페이지 {displayIndex} <span className="opacity-60">/ {totalPages}</span>
+        </span>
+        <span className="w-12 h-px" style={{ background: 'var(--color-line)' }} />
+      </div>
+    <div
+      className="relative paper"
       style={{
         width: w,
         height: h,
         transform: rotate ? `rotate(${rotate}deg)` : undefined,
         cursor: addTextMode ? 'crosshair' : 'default',
+        // active 페이지는 accent ring 으로 시각적으로 더 명확.
+        outline: active ? '2px solid var(--color-accent)' : '1px solid var(--color-line)',
+        outlineOffset: '2px',
       }}
       onDoubleClick={(e) => {
         if (!addTextMode || !onCanvasClick) return;
@@ -127,6 +153,7 @@ export function PageView({
           렌더 중…
         </div>
       )}
+    </div>
     </div>
   );
 }
