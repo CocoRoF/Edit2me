@@ -349,8 +349,9 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
     runOps([{ op: 'delete-pages', indices }], indices.length > 0 ? indices[0] : undefined);
   const handleRotate = (indices: number[], angle: 90 | -90) =>
     runOps([{ op: 'rotate-pages', indices, angle }], indices.length > 0 ? indices[0] : undefined);
-  const handleEditText = (blockId: string, newText: string) =>
-    runOps([{ op: 'edit-text', pageIndex: activeIndex, blockId, newText }]);
+  // pageIndex 를 명시적으로 받음 — 비active 페이지의 텍스트 편집도 안전.
+  const handleEditText = (pageIndex: number, blockId: string, newText: string) =>
+    runOps([{ op: 'edit-text', pageIndex, blockId, newText }], pageIndex);
 
   const handleCanvasClick = (pageIndex: number, x: number, y: number) => {
     if (!addTextMode) return;
@@ -494,7 +495,7 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
                 revision={meta.revision}
                 displayIndex={i + 1}
                 totalPages={meta.pages.length}
-                onEditText={p.index === activeIndex ? handleEditText : undefined}
+                onEditText={(blockId, newText) => handleEditText(i, blockId, newText)}
                 onCanvasClick={addTextMode ? handleCanvasClick : undefined}
                 addTextMode={addTextMode && p.index === activeIndex}
                 active={p.index === activeIndex}

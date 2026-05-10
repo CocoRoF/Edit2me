@@ -73,6 +73,10 @@ export function PageView({
       data-page-index={displayIndex - 1}
       className="flex flex-col items-center gap-2 shrink-0"
       style={{ width: w }}
+      // wrapper 어디 클릭이든 (라벨/paper/배경) activate. 단 액션 버튼들은 자체에서
+      // stopPropagation 하므로 안 영향. text-block 더블클릭 시에도 activate 가 자연스럽게
+      // 발사됨 (text-block 의 onMouseDown 도 stopPropagation 안 하므로 bubble 됨).
+      onClick={() => onActivate?.()}
     >
       {/* 페이지 구분 라벨 — accent dot + "페이지 N / 총 M". active 페이지면 강조.
           selected 또는 active 일 때 라벨 옆에 회전/삭제 액션 노출. */}
@@ -148,12 +152,7 @@ export function PageView({
         outline: active ? '2px solid var(--color-accent)' : '1px solid var(--color-line)',
         outlineOffset: '2px',
       }}
-      onClick={(e) => {
-        // text block editor 내부 클릭은 통과 (편집 모드 유지). paper 자체 클릭만 activate.
-        const target = e.target as HTMLElement;
-        if (target.closest('.text-block')) return;
-        onActivate?.();
-      }}
+      // onClick 은 wrapper 에 위임 — bubble 로 wrapper 가 받아 activate.
       onDoubleClick={(e) => {
         if (!addTextMode || !onCanvasClick) return;
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
@@ -198,9 +197,11 @@ export function PageView({
           }}
         />
       )}
-      {/* Layer 2: invisible text overlay for inline editing */}
+      {/* Layer 2: invisible text overlay for inline editing.
+          모든 페이지에 항상 렌더 — 비active 페이지의 텍스트도 더블클릭 한 번에
+          편집을 시작할 수 있게. canEdit 은 폰트가 인코딩 가능 (b.editable) 인지로만
+          판정하고, 비active 페이지면 onBeginEdit 가 먼저 onActivate 호출 후 편집 시작. */}
       {pageText &&
-        active &&
         pageText.blocks.map((b) => (
           <TextBlockEditor
             key={b.blockId}
@@ -208,8 +209,11 @@ export function PageView({
             pageHeight={page.height}
             zoom={zoom}
             isEditing={editingId === b.blockId}
-            canEdit={!!onEditText && b.editable}
-            onBeginEdit={() => setEditingId(b.blockId)}
+            canEdit={b.editable && !!onEditText}
+            onBeginEdit={() => {
+              if (!active) onActivate?.();
+              setEditingId(b.blockId);
+            }}
             onCommit={(newText) => {
               setEditingId(null);
               if (newText !== b.text && onEditText) onEditText(b.blockId, newText);
