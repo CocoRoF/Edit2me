@@ -2,11 +2,25 @@
 // 에러 시 인라인 placeholder SVG 반환 (200) — 사용자 화면이 갑자기 깨지지 않게.
 
 import { NextRequest } from 'next/server';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { getDoc } from '@/lib/doc-cache';
 import { renderPageSvg } from '@/pdf/render/svg-renderer';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+
+// dev 진단용. 컨테이너 안에서 docker exec edit2me-frontend cat /tmp/edit2me-svg/<file> 로 확인.
+function dumpSvg(kind: 'page' | 'thumb', docId: string, pageIndex: number, rev: number, svg: string): void {
+  try {
+    mkdirSync('/tmp/edit2me-svg', { recursive: true });
+    const safeDoc = docId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32);
+    const path = `/tmp/edit2me-svg/${kind}-${safeDoc}-rev${rev}-p${pageIndex}.svg`;
+    writeFileSync(path, svg);
+    process.stdout.write(`[edit2me] ${kind} ${pageIndex} dumped → ${path}\n`);
+  } catch (e) {
+    process.stderr.write(`[edit2me] svg dump failed: ${(e as Error).message}\n`);
+  }
+}
 
 export async function GET(
   _req: NextRequest,
@@ -50,6 +64,7 @@ export async function GET(
         process.stderr.write(`[edit2me] page ${pageIndex} produced empty SVG\n`);
       }
       entry.svgCache.set(cacheKey, svg);
+      dumpSvg('page', docId, pageIndex, entry.revision, svg);
       if (entry.svgCache.size > 256) {
         const oldest = entry.svgCache.keys().next().value;
         if (oldest) entry.svgCache.delete(oldest);

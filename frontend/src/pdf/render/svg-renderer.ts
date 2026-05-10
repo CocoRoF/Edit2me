@@ -168,6 +168,9 @@ export function renderPageSvg(
   const W = urx - llx;
   const H = ury - lly;
   const rotate = doc.pageRotation(pageDict);
+  process.stdout.write(
+    `[edit2me] page ${pageIndex} setup MediaBox=[${llx},${lly},${urx},${ury}] W=${W} H=${H} rotate=${rotate}\n`,
+  );
 
   // Page-level resources. Form XObject 재귀 시 자체 Resources 로 잠시 override.
   let currentFontMap = buildFontMap(doc, pageDict);
@@ -563,6 +566,9 @@ export function renderPageSvg(
     // CTM 으로 단위 사각형 (0,0)-(1,1) 매핑 — PDF Image XObject 관습
     const M = cur.ctm;
     const mat = `matrix(${fmt(M[0] / w)},${fmt(M[1] / w)},${fmt(M[2] / h)},${fmt(M[3] / h)},${fmt(M[4])},${fmt(M[5])})`;
+    process.stdout.write(
+      `[edit2me] page ${pageIndex} image ${name} CTM=[${fmt(M[0])},${fmt(M[1])},${fmt(M[2])},${fmt(M[3])},${fmt(M[4])},${fmt(M[5])}] (image will cover unitSquare(0,0)-(1,1) → CTM)\n`,
+    );
 
     // ImageMask 처리 (bpc=1, single-channel mask). PDF spec §8.9.6.
     const isImageMask = asBool(dictGet(x.dict, 'ImageMask'));
@@ -712,6 +718,9 @@ export function renderPageSvg(
       // mat 안에 이미 (M[2]/h) 가 들어 있고 outer flip(0,0,0,-1) 과 합쳐지는데, image origin 보정을 위해
       // 자기 좌표계에서 (1, 0, 0, -1, 0, 1) 로 한번 더 flip.
       const finalMat = `matrix(${fmt(M[0] / w)},${fmt(M[1] / w)},${fmt(-M[2] / h)},${fmt(-M[3] / h)},${fmt(M[4] + M[2])},${fmt(M[5] + M[3])})`;
+      process.stdout.write(
+        `[edit2me] page ${pageIndex} image ${name} emit transform=${finalMat} width=${w} height=${h}\n`,
+      );
       out.push(
         `<image${clipAttr()} transform="${finalMat}" width="${w}" height="${h}" preserveAspectRatio="none" href="${dataUrl}"/>`,
       );
