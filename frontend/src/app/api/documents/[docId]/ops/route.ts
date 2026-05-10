@@ -1,15 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { applyOpsToDoc, getDoc } from '@/lib/doc-cache';
-import { Op } from '@/pdf/ops/types';
+import { validateOps } from '@/lib/op-validate';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ docId: string }> }) {
   const { docId } = await ctx.params;
-  const body = (await req.json()) as { baseRevision?: number; ops?: Op[] };
-  if (!body.ops || !Array.isArray(body.ops)) {
-    return NextResponse.json({ error: { code: 'op-invalid' } }, { status: 400 });
+  let body: { baseRevision?: unknown; ops?: unknown };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return NextResponse.json(
+      { error: { code: 'op-invalid', message: 'invalid JSON body' } },
+      { status: 400 },
+    );
+  }
+
+  const v = validateOps(body.ops);
+  if (!v.ok) {
+    return NextResponse.json(
+      { error: { code: 'op-invalid', message: v.error } },
+      { status: 400 },
+    );
   }
 
   const entry = await getDoc(docId);
@@ -23,10 +36,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ docId: str
   }
 
   try {
-    const result = await applyOpsToDoc(docId, body.ops);
+    const result = await applyOpsToDoc(docId, v.ops!);
     if (!result) return NextResponse.json({ error: { code: 'doc-not-found' } }, { status: 404 });
-    return NextResponse.json({ ...result, appliedOps: body.ops.length });
-    // result already includes canUndo/canRedo
+    return NextResponse.json({ ...result, appliedOps: v.ops!.length });
   } catch (e) {
     return NextResponse.json(
       { error: { code: 'op-failed', message: (e as Error).message } },
