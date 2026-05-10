@@ -240,6 +240,16 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
         } else {
           await reloadAffected(res.affectedPages);
         }
+        // 사용자 액션 종류별 toast.
+        for (const o of ops) {
+          if (o.op === 'edit-text' || o.op === 'edit-text-group') {
+            toast.success('텍스트가 수정되었습니다');
+          } else if (o.op === 'delete-pages') {
+            toast.info(`${o.indices.length}개 페이지 삭제됨 (Ctrl+Z 로 되돌리기)`);
+          } else if (o.op === 'rotate-pages') {
+            toast.info('페이지 회전됨');
+          }
+        }
         return res;
       } catch (e) {
         toast.error((e as Error).message);
