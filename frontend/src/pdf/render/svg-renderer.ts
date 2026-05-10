@@ -28,6 +28,7 @@ import { decodeStream, getFilterChain } from '../core/stream';
 import { ContentOp, parseContent } from '../graphics/content-stream';
 import { buildFontMap, FontInfo } from '../fonts/font-info';
 import { encodePng } from './png-encoder';
+import zlib from 'node:zlib';
 
 type Mat6 = [number, number, number, number, number, number];
 const IDENTITY: Mat6 = [1, 0, 0, 1, 0, 0];
@@ -563,10 +564,14 @@ export function renderPageSvg(
     const M = cur.ctm;
     const mat = `matrix(${fmt(M[0] / w)},${fmt(M[1] / w)},${fmt(M[2] / h)},${fmt(M[3] / h)},${fmt(M[4])},${fmt(M[5])})`;
 
-    // Filter 분석: DCTDecode (JPEG) → 그대로 data URL. 그 외는 raw → PNG.
+    // ImageMask 처리 (bpc=1, single-channel mask). PDF spec §8.9.6.
+    const isImageMask = asBool(dictGet(x.dict, 'ImageMask'));
+
+    // Filter 분석
     const filters = getFilterChain(x.stream);
     const lastFilter = filters[filters.length - 1]?.name;
     let dataUrl: string | undefined;
+
     if (lastFilter === 'DCTDecode' || lastFilter === 'DCT') {
       const b64 = base64Encode(x.stream.raw);
       dataUrl = `data:image/jpeg;base64,${b64}`;
@@ -574,41 +579,85 @@ export function renderPageSvg(
       const b64 = base64Encode(x.stream.raw);
       dataUrl = `data:image/jp2;base64,${b64}`;
     } else {
-      // raw decoded pixel data → PNG
+      // Raw pixel data → unpack(BitsPerComponent) → 8-bit RGB/Gray → PNG
       try {
         const decoded = decodeStream(x.stream);
         const bpc = asNumber(dictGet(x.dict, 'BitsPerComponent')) ?? 8;
-        const csObj = dictGet(x.dict, 'ColorSpace');
-        let channels = 1;
-        if (csObj && isName(csObj)) {
-          const cs = csObj.value;
-          if (cs === 'DeviceRGB') channels = 3;
-          else if (cs === 'DeviceGray') channels = 1;
-          else if (cs === 'DeviceCMYK') channels = 4;
-        } else if (csObj && isArray(csObj)) {
-          const head = csObj.items[0];
-          if (head && head.kind === 'name') {
-            if (head.value === 'ICCBased') {
-              const params = csObj.items[1];
-              if (params && params.kind === 'ref') {
-                const r = doc.resolve(params);
-                if (isStream(r)) {
-                  const n = asNumber(dictGet(r.dict, 'N')) ?? 0;
-                  channels = n;
-                }
-              }
-            } else if (head.value === 'Indexed') {
-              channels = 1;
-            }
+        // Decode array (선택). 1bpp gray 의 default 는 [0, 1] (0=black, 1=white).
+        const decodeObj = dictGet(x.dict, 'Decode');
+        let decodeArr: number[] | null = null;
+        if (decodeObj) {
+          const r = doc.resolve(decodeObj);
+          if (isArray(r)) {
+            decodeArr = r.items.map((it) => asNumber(it) ?? 0);
           }
         }
-        // Indexed 는 추가 작업 필요 — 일단 회색 박스
-        if (bpc === 8 && (channels === 1 || channels === 3 || channels === 4)) {
-          const png = encodePng(decoded, w, h, channels === 1 ? 'gray' : channels === 3 ? 'rgb' : 'cmyk-as-rgb');
+
+        if (isImageMask) {
+          // 1bpp single-channel; 0=paint with current fill, 1=transparent.
+          // 단순화: 현재 fillColor 로 paint, 0/1 → opaque/transparent (PDF default Decode=[0 1]).
+          const unpacked = unpackBitsToBytes(decoded, w, h, 1, bpc, decodeArr ?? [0, 1]);
+          // RGBA: fill 색 + alpha 인 경우만 emit.
+          const c = cur.fillColor;
+          const r = Math.round(c[0] * 255), g = Math.round(c[1] * 255), b = Math.round(c[2] * 255);
+          const rgba = new Uint8Array(w * h * 4);
+          for (let i = 0; i < unpacked.length; i += 1) {
+            const opaque = unpacked[i]! < 128; // 0=paint, 1=transparent (default Decode)
+            rgba[i * 4] = r;
+            rgba[i * 4 + 1] = g;
+            rgba[i * 4 + 2] = b;
+            rgba[i * 4 + 3] = opaque ? 255 : 0;
+          }
+          const png = encodePngRgba(rgba, w, h);
           dataUrl = `data:image/png;base64,${base64Encode(png)}`;
+        } else {
+          const csObj = dictGet(x.dict, 'ColorSpace');
+          const cs = resolveImageColorSpace(doc, csObj);
+          // Sample 단위 unpack (channels per pixel × bpc)
+          const samples = unpackBitsToBytes(decoded, w, h, cs.channels, bpc, decodeArr);
+          // ColorSpace 별로 RGB byte 배열 생성
+          let pngBytes: Uint8Array;
+          if (cs.kind === 'gray') {
+            pngBytes = encodePng(samples, w, h, 'gray');
+          } else if (cs.kind === 'rgb') {
+            pngBytes = encodePng(samples, w, h, 'rgb');
+          } else if (cs.kind === 'cmyk') {
+            pngBytes = encodePng(samples, w, h, 'cmyk-as-rgb');
+          } else if (cs.kind === 'indexed') {
+            // samples 의 각 byte 가 palette index. lookup → base color → RGB
+            const rgb = new Uint8Array(w * h * 3);
+            for (let i = 0; i < samples.length; i += 1) {
+              const idx = samples[i]!;
+              const off = idx * cs.baseChannels;
+              if (cs.baseChannels === 1) {
+                const v = cs.lookup[off] ?? 0;
+                rgb[i * 3] = v;
+                rgb[i * 3 + 1] = v;
+                rgb[i * 3 + 2] = v;
+              } else if (cs.baseChannels === 3) {
+                rgb[i * 3] = cs.lookup[off] ?? 0;
+                rgb[i * 3 + 1] = cs.lookup[off + 1] ?? 0;
+                rgb[i * 3 + 2] = cs.lookup[off + 2] ?? 0;
+              } else if (cs.baseChannels === 4) {
+                const c1 = (cs.lookup[off] ?? 0) / 255;
+                const m1 = (cs.lookup[off + 1] ?? 0) / 255;
+                const y1 = (cs.lookup[off + 2] ?? 0) / 255;
+                const k1 = (cs.lookup[off + 3] ?? 0) / 255;
+                const [rr, gg, bb] = cmykToRgb(c1, m1, y1, k1);
+                rgb[i * 3] = Math.round(rr * 255);
+                rgb[i * 3 + 1] = Math.round(gg * 255);
+                rgb[i * 3 + 2] = Math.round(bb * 255);
+              }
+            }
+            pngBytes = encodePng(rgb, w, h, 'rgb');
+          } else {
+            throw new Error(`unsupported colorspace`);
+          }
+          dataUrl = `data:image/png;base64,${base64Encode(pngBytes)}`;
         }
       } catch (e) {
-        diagnostics.add(`image-decode-failed:${name}`);
+        diagnostics.add(`image-decode-failed:${name}:${(e as Error).message.slice(0, 60)}`);
+        process.stderr.write(`[edit2me] image ${name} decode failed: ${(e as Error).message}\n`);
       }
     }
 
@@ -955,4 +1004,215 @@ function buildXObjectMap(doc: PdfDocument, page: PdfDict): XObjMap {
 
 function base64Encode(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('base64');
+}
+
+function asBool(o: import('../core/object').PdfObject | undefined): boolean {
+  if (!o) return false;
+  return o.kind === 'bool' && o.value === true;
+}
+
+// ---- Image bit unpack ----
+//
+// PDF Image XObject 의 raw byte stream 은 bpc(BitsPerComponent) 단위 packed.
+// 한 row 는 byte 경계로 padded (PDF spec §8.9.3).
+// row bytes = ceil(width × channels × bpc / 8).
+// PNG 인코더는 8bit 만 받으므로 모두 0–255 byte 로 unpack.
+//
+// /Decode 가 있으면 [dmin0 dmax0 dmin1 dmax1 ...] 로 채널 별 변환:
+//   value_normalized = dmin + (raw / (2^bpc - 1)) * (dmax - dmin)
+//   final_byte = round(clamp(value_normalized, 0, 1) * 255)
+//
+// /Decode 없으면 default:
+//   - DeviceGray, RGB, CMYK: [0 1 0 1 ...]
+//   - Indexed: [0 (2^bpc - 1)] (raw index)
+
+function unpackBitsToBytes(
+  raw: Uint8Array,
+  width: number,
+  height: number,
+  channels: number,
+  bpc: number,
+  decodeArr: number[] | null,
+): Uint8Array {
+  const out = new Uint8Array(width * height * channels);
+  const maxRaw = (1 << bpc) - 1;
+  const bitsPerRow = width * channels * bpc;
+  const rowBytes = Math.ceil(bitsPerRow / 8);
+  let outIdx = 0;
+  for (let y = 0; y < height; y += 1) {
+    const rowStart = y * rowBytes;
+    let bitOff = 0;
+    for (let x = 0; x < width; x += 1) {
+      for (let c = 0; c < channels; c += 1) {
+        let v = 0;
+        if (bpc === 8) {
+          v = raw[rowStart + (bitOff >> 3)] ?? 0;
+          bitOff += 8;
+        } else if (bpc === 16) {
+          // big-endian high byte 만 사용
+          v = raw[rowStart + (bitOff >> 3)] ?? 0;
+          bitOff += 16;
+        } else if (bpc === 1 || bpc === 2 || bpc === 4) {
+          const byteIdx = rowStart + (bitOff >> 3);
+          const bitInByte = 8 - bpc - (bitOff & 7);
+          v = ((raw[byteIdx] ?? 0) >> bitInByte) & maxRaw;
+          bitOff += bpc;
+        } else {
+          // 비표준 bpc — fallback
+          v = raw[rowStart + (bitOff >> 3)] ?? 0;
+          bitOff += bpc;
+        }
+        // Decode 적용
+        let finalByte: number;
+        if (decodeArr && decodeArr.length >= channels * 2) {
+          const dmin = decodeArr[c * 2] ?? 0;
+          const dmax = decodeArr[c * 2 + 1] ?? 1;
+          const norm = dmin + (v / maxRaw) * (dmax - dmin);
+          finalByte = Math.max(0, Math.min(255, Math.round(norm * 255)));
+        } else if (bpc === 8) {
+          finalByte = v;
+        } else {
+          // default decode [0, 1] for color spaces, identity for indexed
+          finalByte = Math.round((v / maxRaw) * 255);
+        }
+        out[outIdx++] = finalByte;
+      }
+    }
+  }
+  return out;
+}
+
+// 추가 PNG 인코더 — RGBA (color type 6, 8-bit). ImageMask 의 transparency 표현용.
+
+function encodePngRgba(rgba: Uint8Array, width: number, height: number): Uint8Array {
+  const sigPng = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const ihdr = new Uint8Array(13);
+  const dvIhdr = new DataView(ihdr.buffer);
+  dvIhdr.setUint32(0, width);
+  dvIhdr.setUint32(4, height);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // RGBA
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+  const rowSize = width * 4;
+  const filtered = new Uint8Array(height * (rowSize + 1));
+  for (let y = 0; y < height; y += 1) {
+    filtered[y * (rowSize + 1)] = 0;
+    filtered.set(rgba.subarray(y * rowSize, y * rowSize + rowSize), y * (rowSize + 1) + 1);
+  }
+  const compressed = zlib.deflateSync(Buffer.from(filtered));
+  const chunks = [
+    sigPng,
+    chunkOf('IHDR', ihdr),
+    chunkOf('IDAT', new Uint8Array(compressed)),
+    chunkOf('IEND', new Uint8Array(0)),
+  ];
+  let total = 0;
+  for (const c of chunks) total += c.length;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.length;
+  }
+  return out;
+}
+function chunkOf(type: string, data: Uint8Array): Uint8Array {
+  const out = new Uint8Array(8 + data.length + 4);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, data.length);
+  for (let i = 0; i < 4; i += 1) out[4 + i] = type.charCodeAt(i);
+  out.set(data, 8);
+  const crcBuf = new Uint8Array(4 + data.length);
+  for (let i = 0; i < 4; i += 1) crcBuf[i] = type.charCodeAt(i);
+  crcBuf.set(data, 4);
+  dv.setUint32(8 + data.length, crc32Bytes(crcBuf));
+  return out;
+}
+let _crcTable: Uint32Array | null = null;
+function crc32Bytes(bytes: Uint8Array): number {
+  if (!_crcTable) {
+    _crcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let c = n;
+      for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      _crcTable[n] = c >>> 0;
+    }
+  }
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i += 1) c = _crcTable[(c ^ bytes[i]!) & 0xff]! ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+// ---- ImageColorSpace 정규화 ----
+
+type ImageCs =
+  | { kind: 'gray'; channels: 1 }
+  | { kind: 'rgb'; channels: 3 }
+  | { kind: 'cmyk'; channels: 4 }
+  | { kind: 'indexed'; channels: 1; baseChannels: 1 | 3 | 4; lookup: Uint8Array };
+
+function resolveImageColorSpace(
+  doc: PdfDocument,
+  csObj: import('../core/object').PdfObject | undefined,
+): ImageCs {
+  if (!csObj) return { kind: 'gray', channels: 1 };
+  const cs = doc.resolve(csObj);
+  if (isName(cs)) {
+    if (cs.value === 'DeviceRGB' || cs.value === 'RGB') return { kind: 'rgb', channels: 3 };
+    if (cs.value === 'DeviceGray' || cs.value === 'G') return { kind: 'gray', channels: 1 };
+    if (cs.value === 'DeviceCMYK' || cs.value === 'CMYK') return { kind: 'cmyk', channels: 4 };
+    return { kind: 'gray', channels: 1 };
+  }
+  if (isArray(cs) && cs.items.length > 0) {
+    const head = cs.items[0]!;
+    if (head.kind === 'name') {
+      if (head.value === 'ICCBased') {
+        // /ICCBased [ stream ]: stream dict 의 /N 으로 채널 수
+        const params = cs.items[1] ? doc.resolve(cs.items[1]) : undefined;
+        if (params && isStream(params)) {
+          const n = asNumber(dictGet(params.dict, 'N')) ?? 3;
+          if (n === 1) return { kind: 'gray', channels: 1 };
+          if (n === 4) return { kind: 'cmyk', channels: 4 };
+          return { kind: 'rgb', channels: 3 };
+        }
+        return { kind: 'rgb', channels: 3 };
+      }
+      if (head.value === 'Indexed' || head.value === 'I') {
+        // [/Indexed base hival lookup]
+        const baseObj = cs.items[1] ? doc.resolve(cs.items[1]) : undefined;
+        const hival = asNumber(doc.resolve(cs.items[2] ?? { kind: 'null' })) ?? 0;
+        const lookupObj = cs.items[3] ? doc.resolve(cs.items[3]) : undefined;
+        let lookup: Uint8Array = new Uint8Array();
+        if (lookupObj) {
+          if (lookupObj.kind === 'string') lookup = lookupObj.bytes;
+          else if (lookupObj.kind === 'stream') lookup = decodeStream(lookupObj);
+        }
+        let baseChannels: 1 | 3 | 4 = 3;
+        if (baseObj && isName(baseObj)) {
+          if (baseObj.value === 'DeviceGray') baseChannels = 1;
+          else if (baseObj.value === 'DeviceCMYK') baseChannels = 4;
+        } else if (baseObj && isArray(baseObj) && baseObj.items[0] && baseObj.items[0].kind === 'name') {
+          if (baseObj.items[0].value === 'ICCBased') {
+            const p = baseObj.items[1] ? doc.resolve(baseObj.items[1]) : undefined;
+            if (p && isStream(p)) {
+              const n = asNumber(dictGet(p.dict, 'N')) ?? 3;
+              baseChannels = n === 1 ? 1 : n === 4 ? 4 : 3;
+            }
+          }
+        }
+        void hival;
+        return { kind: 'indexed', channels: 1, baseChannels, lookup };
+      }
+      if (head.value === 'CalGray') return { kind: 'gray', channels: 1 };
+      if (head.value === 'CalRGB') return { kind: 'rgb', channels: 3 };
+      if (head.value === 'Lab') return { kind: 'rgb', channels: 3 };
+      if (head.value === 'DeviceN' || head.value === 'Separation') {
+        // 단순화: 1 채널 grayscale 대체
+        return { kind: 'gray', channels: 1 };
+      }
+    }
+  }
+  return { kind: 'gray', channels: 1 };
 }
