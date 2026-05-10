@@ -65,4 +65,18 @@ describe('cmap parser', () => {
     `);
     expect(r.codeRanges).toEqual([{ low: 0, high: 0xffff, bytes: 2 }]);
   });
+
+  it('detects /WMode 1 def for vertical writing', () => {
+    const r = cmap(`
+      begincmap
+      /WMode 1 def
+      endcmap
+    `);
+    expect(r.wmode).toBe(1);
+  });
+
+  it('defaults wmode to 0 (horizontal)', () => {
+    const r = cmap('begincmap endcmap');
+    expect(r.wmode).toBe(0);
+  });
 });
