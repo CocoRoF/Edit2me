@@ -23,7 +23,7 @@ export interface DocumentMeta {
   revision: number;
   canUndo?: boolean;
   canRedo?: boolean;
-  diagnostics?: Array<{ level: string; code: string; message: string }>;
+  diagnostics?: Array<{ level: 'info' | 'warn' | 'error'; code: string; message: string }>;
 }
 
 export interface OpResult {

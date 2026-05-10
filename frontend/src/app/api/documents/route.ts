@@ -107,6 +107,8 @@ export async function POST(req: NextRequest) {
     version: doc.version,
     encrypted: false,
     diagnostics: doc.diagnostics,
+    canUndo: false,
+    canRedo: false,
     pages,
     revision: 0,
     createdAt: new Date().toISOString(),
