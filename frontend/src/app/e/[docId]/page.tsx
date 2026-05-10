@@ -442,6 +442,11 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
                 selected={selected.has(i)}
                 onRotate={(angle) => handleRotate([i], angle)}
                 onDelete={() => handleDelete([i])}
+                onActivate={() => {
+                  // 캔버스 페이지 클릭 → 사이드바 선택 동기화: single 모드 select + activate.
+                  handleSelect(i, 'single');
+                  setActive(i);
+                }}
               />
             ))
           )}

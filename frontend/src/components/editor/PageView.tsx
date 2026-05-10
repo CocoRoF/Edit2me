@@ -26,6 +26,8 @@ interface Props {
   onRotate?: (angle: 90 | -90) => void;
   /** 페이지 삭제 */
   onDelete?: () => void;
+  /** 페이지 paper 자체 클릭 시 activate 시그널 — 사이드바 selection 동기화용 */
+  onActivate?: () => void;
 }
 
 export function PageView({
@@ -43,6 +45,7 @@ export function PageView({
   selected,
   onRotate,
   onDelete,
+  onActivate,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [ref, inView] = useIntersection<HTMLDivElement>('1000px');
@@ -116,6 +119,12 @@ export function PageView({
         // active 페이지는 accent ring 으로 시각적으로 더 명확.
         outline: active ? '2px solid var(--color-accent)' : '1px solid var(--color-line)',
         outlineOffset: '2px',
+      }}
+      onClick={(e) => {
+        // text block editor 내부 클릭은 통과 (편집 모드 유지). paper 자체 클릭만 activate.
+        const target = e.target as HTMLElement;
+        if (target.closest('.text-block')) return;
+        onActivate?.();
       }}
       onDoubleClick={(e) => {
         if (!addTextMode || !onCanvasClick) return;
