@@ -28,26 +28,20 @@ export async function GET(
       const r = renderPageSvg(entry.doc, page.dict, pageIndex);
       svg = r.svg;
       const dt = Date.now() - t0;
-      // 항상 로그 — 사용자가 어느 페이지가 얼마나 걸리는지 즉시 확인 가능
-      // eslint-disable-next-line no-console
-      console.log(
-        `[edit2me] page ${pageIndex} rendered in ${dt}ms (${svg.length} bytes${r.diagnostics.length > 0 ? `, ${r.diagnostics.length} diags` : ''})`,
+      process.stdout.write(
+        `[edit2me] page ${pageIndex} rendered in ${dt}ms (${svg.length} bytes${r.diagnostics.length > 0 ? `, ${r.diagnostics.length} diags` : ''})\n`,
       );
       if (r.diagnostics.length > 0) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[edit2me] page ${pageIndex} diagnostics:`,
-          r.diagnostics.slice(0, 10).join(' | '),
+        process.stdout.write(
+          `[edit2me] page ${pageIndex} diagnostics: ${r.diagnostics.slice(0, 10).join(' | ')}\n`,
         );
       }
-      // 빈 SVG 방어 — 항상 최소 viewBox 보장
       if (!svg || svg.length < 50) {
         const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);
         const w = urx - llx;
         const h = ury - lly;
         svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="white"/></svg>`;
-        // eslint-disable-next-line no-console
-        console.warn(`[edit2me] page ${pageIndex} produced empty SVG`);
+        process.stderr.write(`[edit2me] page ${pageIndex} produced empty SVG\n`);
       }
       entry.svgCache.set(cacheKey, svg);
       if (entry.svgCache.size > 256) {
@@ -55,8 +49,7 @@ export async function GET(
         if (oldest) entry.svgCache.delete(oldest);
       }
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error(`[edit2me] page ${pageIndex} render threw:`, (e as Error).stack ?? e);
+      process.stderr.write(`[edit2me] page ${pageIndex} render threw: ${(e as Error).stack ?? e}\n`);
       const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);
       const w = urx - llx;
       const h = ury - lly;

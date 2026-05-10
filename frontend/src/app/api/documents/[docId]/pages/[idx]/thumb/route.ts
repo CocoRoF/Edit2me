@@ -24,9 +24,8 @@ export async function GET(
       const t0 = Date.now();
       const r = renderPageSvg(entry.doc, page.dict, pageIndex);
       svg = r.svg;
-      // eslint-disable-next-line no-console
-      console.log(
-        `[edit2me] thumb ${pageIndex} rendered in ${Date.now() - t0}ms (${svg.length} bytes)`,
+      process.stdout.write(
+        `[edit2me] thumb ${pageIndex} rendered in ${Date.now() - t0}ms (${svg.length} bytes)\n`,
       );
       if (!svg || svg.length < 50) {
         const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);
@@ -36,8 +35,7 @@ export async function GET(
       }
       entry.svgCache.set(cacheKey, svg);
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error(`[edit2me] thumb page ${pageIndex} threw:`, (e as Error).stack ?? e);
+      process.stderr.write(`[edit2me] thumb page ${pageIndex} threw: ${(e as Error).stack ?? e}\n`);
       const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);
       const w = urx - llx;
       const h = ury - lly;
