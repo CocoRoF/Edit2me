@@ -215,6 +215,7 @@ export function PageView({
             isEditing={editingId === b.blockId}
             isSelected={selectedBlockId === b.blockId}
             canEdit={b.editable && !!onEditText}
+            availableChars={pageText.availableChars}
             onSelect={() => {
               if (!active) onActivate?.();
               setSelectedBlockId(b.blockId);
@@ -253,6 +254,7 @@ function TextBlockEditor({
   isEditing,
   isSelected,
   canEdit,
+  availableChars,
   onSelect,
   onBeginEdit,
   onCommit,
@@ -265,6 +267,7 @@ function TextBlockEditor({
   isEditing: boolean;
   isSelected: boolean;
   canEdit: boolean;
+  availableChars: string;
   onSelect: () => void;
   onBeginEdit: () => void;
   onCommit: (newText: string) => void;
@@ -318,17 +321,25 @@ function TextBlockEditor({
             ? {
                 // 편집 중: width auto 로 텍스트 따라 확장. 원본 width 를 minWidth 로 잡아
                 // 텍스트가 짧아져도 박스가 안 줄어듦. underlying SVG 글자 가리기 위해
-                // 흰 배경 + 명확한 outline.
+                // 흰 배경 + 명확한 outline + 항상 검은 텍스트 (다크 모드 ink 는 흐림).
                 width: 'auto',
                 minWidth: `${width}px`,
                 maxWidth: `${maxEditWidth}px`,
-                background: '#fff',
-                color: 'var(--color-ink)',
+                background: '#ffffff',
+                color: '#0b1020',
+                fontWeight: 500,
                 outline: '2px solid var(--color-accent)',
                 outlineOffset: '2px',
                 boxShadow: '0 4px 14px -4px var(--color-accent)',
                 zIndex: 20,
-                padding: '0 2px',
+                padding: '0 4px',
+                // 시스템 폰트 fallback — Korean 도 또렷이.
+                fontFamily:
+                  '"Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", -apple-system, sans-serif',
+                // antialiasing 강화
+                WebkitFontSmoothing: 'antialiased',
+                MozOsxFontSmoothing: 'grayscale',
+                textRendering: 'optimizeLegibility',
               }
             : {
                 width: `${width}px`,
@@ -389,14 +400,15 @@ function TextBlockEditor({
           mousedown 으로 onBlur 트리거되지 않도록 preventDefault. */}
       {isEditing && (
         <div
-          className="absolute z-30 inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[11px] shadow-pop"
+          className="absolute z-30 flex flex-col gap-1 p-1.5 rounded-md text-[11px] shadow-pop"
           style={{
             left: `${left}px`,
-            top: `${Math.max(0, top - 32)}px`,
+            top: `${Math.max(0, top - 56)}px`,
             background: 'var(--color-surface)',
             border: '1px solid var(--color-line)',
             whiteSpace: 'nowrap',
             pointerEvents: 'auto',
+            minWidth: '220px',
           }}
           onMouseDown={(e) => {
             // 마우스 down 으로 contentEditable 가 blur 되는 걸 방지.
@@ -405,32 +417,45 @@ function TextBlockEditor({
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <span className="text-[color:var(--color-muted)]">편집 중</span>
-          <span className="text-[color:var(--color-line-strong)]">·</span>
-          <button
-            className="px-1.5 py-0.5 rounded text-[color:var(--color-accent)] hover:bg-[color:var(--color-accent-soft)] font-medium"
-            onClick={(e) => {
-              e.stopPropagation();
-              const span = (e.currentTarget.parentElement?.previousElementSibling) as HTMLElement | null;
-              if (span) {
-                const newText = span.innerText;
-                if (newText.trim() === '' || newText === b.text) onCancel();
-                else onCommit(newText);
-              }
-            }}
-          >
-            저장 (Enter)
-          </button>
-          <span className="text-[color:var(--color-line-strong)]">·</span>
-          <button
-            className="px-1.5 py-0.5 rounded text-[color:var(--color-muted)] hover:bg-[color:var(--color-surface-2)]"
-            onClick={(e) => {
-              e.stopPropagation();
-              onCancel();
-            }}
-          >
-            취소 (Esc)
-          </button>
+          <div className="flex items-center gap-1">
+            <span className="text-[color:var(--color-muted)]">편집 중</span>
+            <span className="text-[color:var(--color-line-strong)]">·</span>
+            <button
+              className="px-1.5 py-0.5 rounded text-[color:var(--color-accent)] hover:bg-[color:var(--color-accent-soft)] font-medium"
+              onClick={(e) => {
+                e.stopPropagation();
+                const root = e.currentTarget.closest('div')?.parentElement; // toolbar root
+                const span = root?.previousElementSibling as HTMLElement | null;
+                if (span) {
+                  const newText = span.innerText;
+                  if (newText.trim() === '' || newText === b.text) onCancel();
+                  else onCommit(newText);
+                }
+              }}
+            >
+              저장 (Enter)
+            </button>
+            <span className="text-[color:var(--color-line-strong)]">·</span>
+            <button
+              className="px-1.5 py-0.5 rounded text-[color:var(--color-muted)] hover:bg-[color:var(--color-surface-2)]"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCancel();
+              }}
+            >
+              취소 (Esc)
+            </button>
+          </div>
+          {/* PDF subset 폰트 한계 안내 — 사용자가 입력한 글자가 PDF 폰트에 없으면 reject. */}
+          {availableChars.length > 0 && (
+            <div
+              className="text-[10px] text-[color:var(--color-muted-2)] truncate"
+              style={{ maxWidth: '320px' }}
+              title={`이 PDF 폰트가 가진 모든 글자 (총 ${availableChars.length}자):\n${availableChars}`}
+            >
+              💡 이 PDF 의 폰트 글자만 사용 가능 ({availableChars.length}자)
+            </div>
+          )}
         </div>
       )}
     </>

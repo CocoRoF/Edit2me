@@ -120,6 +120,13 @@ body {
   /* style 은 inline 으로 강력하게 override (흰 배경 + 명확한 outline). 이 클래스는 z-index만. */
   z-index: 20;
 }
+.text-block.editing::selection,
+.text-block.editing *::selection {
+  /* 다크 테마의 default selection 이 진한 색이라 흰 배경 + 검은 글자를 덮어 흐려 보임.
+     명확한 accent-soft 배경 + 검은 글자 유지. */
+  background: rgba(79, 70, 229, 0.25);
+  color: #0b1020;
+}
 .text-block.readonly {
   cursor: default;
 }

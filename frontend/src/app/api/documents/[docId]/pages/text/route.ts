@@ -46,6 +46,7 @@ export async function GET(
     width: number;
     height: number;
     rotate: number;
+    availableChars: string;
     blocks: Array<{
       blockId: string;
       blockIds: string[];
@@ -73,11 +74,20 @@ export async function GET(
     // 시각 단위로 grouping: 같은 baseline + 같은 폰트 + 인접 segment → 하나의 박스.
     // 사용자에게 "한 줄짜리 단어/구절" 이 한 box 로 보이고, 그룹 단위 편집.
     const groups = groupRuns(result.runs);
+    // 이 페이지에 *이미 등장한* 글자들 — subset 폰트 환경에서 편집에 안전하게 사용 가능한
+    // 글자 set. UI 가 toolbar hint 로 보여줌.
+    const availableSet = new Set<string>();
+    for (const r of result.runs) {
+      if (!r.fullyDecoded) continue;
+      for (const ch of r.text) availableSet.add(ch);
+    }
+    const availableChars = [...availableSet].join('');
     out.push({
       pageIndex: i,
       width: urx - llx,
       height: ury - lly,
       rotate: entry.doc.pageRotation(page.dict),
+      availableChars,
       blocks: groups.map((g) => ({
         // 그룹의 primary id 가 blockId 가 됨. 편집 commit 시 backend 가 blockIds 로 group edit.
         blockId: g.groupId,
