@@ -1,10 +1,23 @@
 // Thumbnail = full page SVG (browser 가 작게 표시). 단일 cache 사용.
 
 import { NextRequest } from 'next/server';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { getDoc } from '@/lib/doc-cache';
 import { renderPageSvg } from '@/pdf/render/svg-renderer';
 
 export const runtime = 'nodejs';
+
+function dumpSvg(kind: 'page' | 'thumb', docId: string, pageIndex: number, rev: number, svg: string): void {
+  try {
+    mkdirSync('/tmp/edit2me-svg', { recursive: true });
+    const safeDoc = docId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32);
+    const path = `/tmp/edit2me-svg/${kind}-${safeDoc}-rev${rev}-p${pageIndex}.svg`;
+    writeFileSync(path, svg);
+    process.stdout.write(`[edit2me] ${kind} ${pageIndex} dumped → ${path}\n`);
+  } catch (e) {
+    process.stderr.write(`[edit2me] svg dump failed: ${(e as Error).message}\n`);
+  }
+}
 
 export async function GET(
   _req: NextRequest,
@@ -40,6 +53,7 @@ export async function GET(
         svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="white"/></svg>`;
       }
       entry.svgCache.set(cacheKey, svg);
+      dumpSvg('thumb', docId, pageIndex, entry.revision, svg);
     } catch (e) {
       process.stderr.write(`[edit2me] thumb page ${pageIndex} threw: ${(e as Error).stack ?? e}\n`);
       const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);
