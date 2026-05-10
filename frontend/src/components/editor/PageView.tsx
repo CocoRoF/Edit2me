@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { PageMeta, PageText, TextBlock } from '@/lib/api';
 import { svgUrl } from '@/lib/api';
 import { useIntersection } from '@/hooks/useIntersection';
-import { RotateCcw, RotateCw, Trash2 } from 'lucide-react';
+import { RotateCcw, RotateCw, Trash2, FilePlus } from 'lucide-react';
 
 interface Props {
   docId: string;
@@ -28,6 +28,9 @@ interface Props {
   onDelete?: () => void;
   /** 페이지 paper 자체 클릭 시 activate 시그널 — 사이드바 selection 동기화용 */
   onActivate?: () => void;
+  /** 이 페이지 *위에* PDF file 을 삽입. 호출 시 새로 삽입된 첫 페이지 index 를 반환하면
+      (또는 promise resolve 시) 부모가 scroll 등 후처리를 수행. */
+  onInsertPdf?: (file: File) => void;
 }
 
 export function PageView({
@@ -46,10 +49,12 @@ export function PageView({
   onRotate,
   onDelete,
   onActivate,
+  onInsertPdf,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [ref, inView] = useIntersection<HTMLDivElement>('1000px');
   const [svgLoaded, setSvgLoaded] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const w = page.width * zoom;
   const h = page.height * zoom;
@@ -64,6 +69,8 @@ export function PageView({
     <div
       ref={ref}
       // 외곽 wrapper: 페이지 라벨 + paper. shrink-0 (zoom 시 height 짜부 방지).
+      // data-page-index: parent 가 op 후 이 페이지로 scrollIntoView 할 때 lookup.
+      data-page-index={displayIndex - 1}
       className="flex flex-col items-center gap-2 shrink-0"
       style={{ width: w }}
     >
@@ -83,7 +90,7 @@ export function PageView({
           페이지 {displayIndex} <span className="opacity-60">/ {totalPages}</span>
         </span>
         <span className="w-12 h-px" style={{ background: 'var(--color-line)' }} />
-        {(active || selected) && (onRotate || onDelete) && (
+        {(active || selected) && (onRotate || onDelete || onInsertPdf) && (
           <div
             className="inline-flex items-center gap-0.5 ml-1 rounded-md border px-0.5"
             style={{
@@ -100,6 +107,27 @@ export function PageView({
               <PageActionBtn title="회전 (시계 90°)" onClick={() => onRotate(90)}>
                 <RotateCw size={14} />
               </PageActionBtn>
+            )}
+            {onInsertPdf && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) onInsertPdf(f);
+                    if (e.target) e.target.value = ''; // 같은 파일 재선택 가능
+                  }}
+                />
+                <PageActionBtn
+                  title="이 페이지 위에 PDF 추가"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <FilePlus size={14} />
+                </PageActionBtn>
+              </>
             )}
             {onDelete && (
               <PageActionBtn title="페이지 삭제" onClick={onDelete} danger>
