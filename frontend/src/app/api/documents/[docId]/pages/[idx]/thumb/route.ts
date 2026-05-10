@@ -21,13 +21,22 @@ export async function GET(
   let svg = entry.svgCache.get(cacheKey);
   if (!svg) {
     try {
-      svg = renderPageSvg(entry.doc, page.dict, pageIndex).svg;
+      const r = renderPageSvg(entry.doc, page.dict, pageIndex);
+      svg = r.svg;
+      if (!svg || svg.length < 50) {
+        const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);
+        const w = urx - llx;
+        const h = ury - lly;
+        svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="white"/></svg>`;
+      }
       entry.svgCache.set(cacheKey, svg);
     } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[edit2me] thumb page ${pageIndex} threw:`, (e as Error).stack ?? e);
       const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);
       const w = urx - llx;
       const h = ury - lly;
-      svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="#f3f4f6"/><text x="50%" y="50%" text-anchor="middle" font-size="${h / 20}" fill="#9ca3af">render error: ${(e as Error).message.slice(0, 80)}</text></svg>`;
+      svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="#f3f4f6"/><text x="50%" y="50%" text-anchor="middle" font-size="${h / 20}" fill="#9ca3af">${(e as Error).message.slice(0, 80)}</text></svg>`;
     }
   }
   return new Response(svg, {
