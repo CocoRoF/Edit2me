@@ -94,6 +94,23 @@ export interface OpResult {
   newPageCount: number;
   canUndo: boolean;
   canRedo: boolean;
+  /**
+   * 전체 페이지 메타 (width, height, rotate). C5 — surgical update:
+   * 클라이언트가 GET /documents/{id} 를 별도 호출하지 않아도 되도록.
+   */
+  pages: Array<{ index: number; width: number; height: number; rotate: 0 | 90 | 180 | 270 }>;
+}
+
+function snapshotPages(entry: DocEntry): OpResult['pages'] {
+  return entry.doc.getPages().map((p, i) => {
+    const [llx, lly, urx, ury] = entry.doc.pageMediaBox(p.dict);
+    return {
+      index: i,
+      width: urx - llx,
+      height: ury - lly,
+      rotate: entry.doc.pageRotation(p.dict),
+    };
+  });
 }
 
 export async function applyOpsToDoc(docId: string, ops: Op[]): Promise<OpResult | null> {
@@ -119,6 +136,7 @@ export async function applyOpsToDoc(docId: string, ops: Op[]): Promise<OpResult 
     ...result,
     canUndo: entry.history.length > 0,
     canRedo: entry.redoStack.length > 0,
+    pages: snapshotPages(entry),
   };
 }
 
@@ -133,11 +151,11 @@ export async function undoDoc(docId: string): Promise<OpResult | null> {
       newPageCount: entry.doc.pageCount(),
       canUndo: false,
       canRedo: entry.redoStack.length > 0,
+      pages: snapshotPages(entry),
     };
   }
   const op = entry.history.pop()!;
   entry.redoStack.push(op);
-  // 원본 byte 부터 history 전체 replay
   entry.doc = PdfDocument.open(entry.originalBytes);
   if (entry.history.length > 0) {
     applyOps(entry.doc, [...entry.history]);
@@ -151,6 +169,7 @@ export async function undoDoc(docId: string): Promise<OpResult | null> {
     newPageCount: entry.doc.pageCount(),
     canUndo: entry.history.length > 0,
     canRedo: entry.redoStack.length > 0,
+    pages: snapshotPages(entry),
   };
 }
 
@@ -165,6 +184,7 @@ export async function redoDoc(docId: string): Promise<OpResult | null> {
       newPageCount: entry.doc.pageCount(),
       canUndo: entry.history.length > 0,
       canRedo: false,
+      pages: snapshotPages(entry),
     };
   }
   const op = entry.redoStack.pop()!;
@@ -180,6 +200,7 @@ export async function redoDoc(docId: string): Promise<OpResult | null> {
     newPageCount: entry.doc.pageCount(),
     canUndo: entry.history.length > 0,
     canRedo: entry.redoStack.length > 0,
+    pages: snapshotPages(entry),
   };
 }
 
