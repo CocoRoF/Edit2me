@@ -19,6 +19,8 @@ export interface CMapData {
   usesParent?: string;
   /** code space의 byte 길이들 (예: [1, 2]). 비어 있으면 파서가 추정. */
   codeRanges: Array<{ low: number; high: number; bytes: number }>;
+  /** 0 = horizontal (default), 1 = vertical. CMap 의 `/WMode N def` 디렉티브. */
+  wmode: 0 | 1;
 }
 
 // ---- Public API ----
@@ -44,7 +46,12 @@ function parseCMapText(text: string): CMapData {
   const out: CMapData = {
     toUnicode: new Map(),
     codeRanges: [],
+    wmode: 0,
   };
+
+  // /WMode N def — vertical writing detection. 본문 어디에도 등장 가능.
+  const wmodeMatch = /\/WMode\s+(\d+)\s+def/.exec(text);
+  if (wmodeMatch && wmodeMatch[1] === '1') out.wmode = 1;
 
   const tokens = tokenize(text);
   let i = 0;

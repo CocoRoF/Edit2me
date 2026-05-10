@@ -150,7 +150,12 @@ export function extractTextFromPage(
         opIndex: opSource.opIndex,
       },
     });
-    cur.text.Tm = translate(cur.text.Tm, advanceWidth, 0);
+    // vertical writing 모드면 (0, -advance) 로 이동, horizontal 이면 (advance, 0)
+    if (font.writingMode === 'vertical') {
+      cur.text.Tm = translate(cur.text.Tm, 0, -advanceWidth);
+    } else {
+      cur.text.Tm = translate(cur.text.Tm, advanceWidth, 0);
+    }
   }
 
   for (const { op, source } of ops) {

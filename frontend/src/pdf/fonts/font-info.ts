@@ -3,6 +3,7 @@
 import {
   PdfDict,
   PdfObject,
+  PdfStream,
   asNumber,
   dictGet,
   isArray,
@@ -30,6 +31,8 @@ export interface FontInfo {
   toUnicode: (code: number) => string | null;
   /** code → advance width (1/1000 em) */
   widthOf: (code: number) => number;
+  /** 'horizontal' (default) | 'vertical' — CMap WMode 에서 결정. */
+  writingMode: 'horizontal' | 'vertical';
   ascent: number;
   descent: number;
   dict: PdfDict;
@@ -72,6 +75,7 @@ export function buildFontInfo(
 
   // ToUnicode CMap
   let toUni: Map<number, string> | undefined;
+  let writingMode: 'horizontal' | 'vertical' = 'horizontal';
   const tuObj = dictGet(fontDict, 'ToUnicode');
   if (tuObj) {
     const stream = doc.resolve(tuObj);
@@ -79,6 +83,7 @@ export function buildFontInfo(
       try {
         const cmap = parseToUnicodeCMap(decodeStream(stream));
         toUni = cmap.toUnicode;
+        if (cmap.wmode === 1) writingMode = 'vertical';
         if (cmap.usesParent) {
           warnings.push(
             `ToUnicode CMap inherits from "${cmap.usesParent}" — parent CMap not bundled (some glyphs may be missing)`,
@@ -181,6 +186,23 @@ export function buildFontInfo(
 
   const encoding = parseEncodingHint(fontDict);
 
+  // ---- writing mode (horizontal vs vertical) ----
+  // Encoding CMap 또는 명명된 CMap 의 -V suffix 또는 stream 의 /WMode 1 이면 vertical.
+  const encObj = dictGet(fontDict, 'Encoding');
+  if (encObj && isName(encObj) && encObj.value.endsWith('-V')) {
+    writingMode = 'vertical';
+  } else if (encObj && isStream(doc.resolve(encObj))) {
+    try {
+      const cmap = parseToUnicodeCMap(decodeStream(doc.resolve(encObj) as PdfStream));
+      if (cmap.wmode === 1) writingMode = 'vertical';
+    } catch {
+      /* ignore — already warned above */
+    }
+  }
+  if (writingMode === 'vertical') {
+    warnings.push('Vertical writing mode — limited support (text positions approximated)');
+  }
+
   function toUnicodeFn(code: number): string | null {
     if (toUni) {
       const u = toUni.get(code);
@@ -227,6 +249,7 @@ export function buildFontInfo(
       if (w !== undefined) return w;
       return defaultWidth;
     },
+    writingMode,
     ascent: coreMetrics?.ascent ?? 700,
     descent: coreMetrics?.descent ?? -200,
     dict: fontDict,
