@@ -386,7 +386,7 @@ export function renderPageSvg(
     function flushTextRun(): void {
       if (textBuf === '') return;
       out.push(
-        `<text${clipAttr()} transform="${textTransform}" style="font-family:${fontFamily};font-size:1px;fill:${fill}" xml:space="preserve">${escapeXml(textBuf)}</text>`,
+        `<text${clipAttr()} transform="${textTransform}" style='font-family:${fontFamily};font-size:1px;fill:${fill}' xml:space="preserve">${escapeXml(textBuf)}</text>`,
       );
       textBuf = '';
     }
@@ -430,7 +430,7 @@ export function renderPageSvg(
           const final = mul(wm, ts.ctm);
           const transform = `matrix(${fmt(final[0])},${fmt(final[1])},${fmt(-final[2])},${fmt(-final[3])},${fmt(final[4])},${fmt(final[5])})`;
           out.push(
-            `<text${clipAttr()} transform="${transform}" style="font-family:${fontFamily};font-size:1px;fill:${fill}" xml:space="preserve">${escapeXml(u)}</text>`,
+            `<text${clipAttr()} transform="${transform}" style='font-family:${fontFamily};font-size:1px;fill:${fill}' xml:space="preserve">${escapeXml(u)}</text>`,
           );
         }
       } else {

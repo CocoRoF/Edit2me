@@ -21,8 +21,13 @@ export async function GET(
   let svg = entry.svgCache.get(cacheKey);
   if (!svg) {
     try {
+      const t0 = Date.now();
       const r = renderPageSvg(entry.doc, page.dict, pageIndex);
       svg = r.svg;
+      // eslint-disable-next-line no-console
+      console.log(
+        `[edit2me] thumb ${pageIndex} rendered in ${Date.now() - t0}ms (${svg.length} bytes)`,
+      );
       if (!svg || svg.length < 50) {
         const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);
         const w = urx - llx;
