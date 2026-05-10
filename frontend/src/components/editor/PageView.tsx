@@ -53,6 +53,8 @@ export function PageView({
   onInsertPdf,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  // 1 click → 선택 (highlight), 2 click → 편집 진입.
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [ref, inView] = useIntersection<HTMLDivElement>('1000px');
   const [svgLoaded, setSvgLoaded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -74,10 +76,12 @@ export function PageView({
       data-page-index={displayIndex - 1}
       className="flex flex-col items-center gap-2 shrink-0"
       style={{ width: w }}
-      // wrapper 어디 클릭이든 (라벨/paper/배경) activate. 단 액션 버튼들은 자체에서
-      // stopPropagation 하므로 안 영향. text-block 더블클릭 시에도 activate 가 자연스럽게
-      // 발사됨 (text-block 의 onMouseDown 도 stopPropagation 안 하므로 bubble 됨).
-      onClick={() => onActivate?.()}
+      // wrapper 어디 클릭이든 (라벨/paper/배경) activate + 선택된 text-block 이 있으면 해제.
+      // 액션 버튼/편집 중 text-block 은 자체에서 stopPropagation 하므로 안 영향.
+      onClick={() => {
+        onActivate?.();
+        setSelectedBlockId(null);
+      }}
     >
       {/* 페이지 구분 라벨 — accent dot + "페이지 N / 총 M". active 페이지면 강조.
           selected 또는 active 일 때 라벨 옆에 회전/삭제 액션 노출. */}
@@ -206,12 +210,19 @@ export function PageView({
             key={b.blockId}
             block={b}
             pageHeight={page.height}
+            pageWidth={page.width}
             zoom={zoom}
             isEditing={editingId === b.blockId}
+            isSelected={selectedBlockId === b.blockId}
             canEdit={b.editable && !!onEditText}
+            onSelect={() => {
+              if (!active) onActivate?.();
+              setSelectedBlockId(b.blockId);
+            }}
             onBeginEdit={() => {
               if (!active) onActivate?.();
               setEditingId(b.blockId);
+              setSelectedBlockId(null);
             }}
             onCommit={(newText) => {
               setEditingId(null);
@@ -237,18 +248,24 @@ export function PageView({
 function TextBlockEditor({
   block: b,
   pageHeight,
+  pageWidth,
   zoom,
   isEditing,
+  isSelected,
   canEdit,
+  onSelect,
   onBeginEdit,
   onCommit,
   onCancel,
 }: {
   block: TextBlock;
   pageHeight: number;
+  pageWidth: number;
   zoom: number;
   isEditing: boolean;
+  isSelected: boolean;
   canEdit: boolean;
+  onSelect: () => void;
   onBeginEdit: () => void;
   onCommit: (newText: string) => void;
   onCancel: () => void;
@@ -257,61 +274,95 @@ function TextBlockEditor({
   const top = (pageHeight - b.y - b.height) * zoom;
   const width = Math.max(0, b.width * zoom);
   const height = Math.max(8, b.height * zoom);
-  const cls = `text-block ${canEdit ? 'editable' : 'readonly'} ${isEditing ? 'editing' : ''}`;
+  const cls = `text-block ${canEdit ? 'editable' : 'readonly'} ${isEditing ? 'editing' : ''} ${isSelected ? 'selected' : ''}`;
   const title = !b.editable
     ? '이 텍스트는 편집할 수 없습니다 (폰트 인코딩 미지원 또는 디코드 실패)'
-    : '더블클릭하여 편집';
+    : isSelected
+      ? '한 번 더 클릭하여 편집 (또는 Enter)'
+      : '클릭하여 선택, 두 번 클릭하면 편집';
+  // 편집 진입 시 contentEditable element 에 안정적으로 focus + select-all.
+  // setTimeout 보다 useEffect + ref 가 안정적 (React commit phase 직후 실행).
+  const editRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (!isEditing) return;
+    const el = editRef.current;
+    if (!el) return;
+    // RAF 한 사이클 미루기 — contentEditable=true 가 DOM 에 반영된 다음.
+    const rafId = requestAnimationFrame(() => {
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [isEditing]);
+  // 편집 중에는 width 를 auto + min-width 로 — 새 텍스트가 길어지면 박스도 같이 확장.
+  // max-width 는 페이지 너비에서 left 만큼 빼 overflow 방지.
+  const maxEditWidth = Math.max(0, pageWidth * zoom - left - 8);
   return (
     <>
       <span
+        ref={editRef}
         className={cls}
         style={{
           left: `${left}px`,
           top: `${top}px`,
-          width: `${width}px`,
           height: `${height}px`,
-          color: isEditing ? 'inherit' : 'transparent',
           fontSize: `${height}px`,
           lineHeight: 1,
           whiteSpace: 'pre',
-          overflow: 'hidden',
-          // 편집 중에는 hover 변색 안 되게 (이미 outline 으로 강조됨)
+          overflow: 'visible',
           ...(isEditing
             ? {
-                background: 'rgba(255, 255, 255, 0.95)',
+                // 편집 중: width auto 로 텍스트 따라 확장. 원본 width 를 minWidth 로 잡아
+                // 텍스트가 짧아져도 박스가 안 줄어듦. underlying SVG 글자 가리기 위해
+                // 흰 배경 + 명확한 outline.
+                width: 'auto',
+                minWidth: `${width}px`,
+                maxWidth: `${maxEditWidth}px`,
+                background: '#fff',
                 color: 'var(--color-ink)',
+                outline: '2px solid var(--color-accent)',
+                outlineOffset: '2px',
+                boxShadow: '0 4px 14px -4px var(--color-accent)',
                 zIndex: 20,
+                padding: '0 2px',
               }
-            : {}),
+            : {
+                width: `${width}px`,
+                color: 'transparent',
+              }),
         }}
         contentEditable={canEdit && isEditing}
         suppressContentEditableWarning
         onClick={(e) => {
-          // 편집 모드 중 단일 클릭은 텍스트 안 caret 이동만 — 페이지 activate (parent
-          // wrapper) 이벤트 차단.
-          if (isEditing) e.stopPropagation();
+          if (!canEdit) return;
+          // wrapper 의 onClick (페이지 deselect) 막기.
+          e.stopPropagation();
+          if (isEditing) return; // caret 이동만
+          if (isSelected) {
+            // 두 번째 클릭: 편집 시작.
+            onBeginEdit();
+          } else {
+            onSelect();
+          }
         }}
         onMouseDown={(e) => {
+          // 더블클릭 시 mousedown → blur 가 발생할 수 있어 stopPropagation 으로 wrapper 까지
+          // bubble 만 막고 default 는 유지 (caret 위치 잡힘).
           if (isEditing) e.stopPropagation();
         }}
         onDoubleClick={(e) => {
+          // 더블클릭 = 즉시 편집 진입 (편의)
           if (!canEdit) return;
           e.stopPropagation();
-          onBeginEdit();
-          setTimeout(() => {
-            const el = e.currentTarget as HTMLElement;
-            if (document.activeElement !== el) el.focus();
-            const range = document.createRange();
-            range.selectNodeContents(el);
-            const sel = window.getSelection();
-            sel?.removeAllRanges();
-            sel?.addRange(range);
-          }, 0);
+          if (!isEditing) onBeginEdit();
         }}
         onBlur={(e) => {
           if (!isEditing) return;
           const newText = (e.currentTarget as HTMLElement).innerText;
-          // 빈 문자열이거나 원본과 동일 → cancel (실수 방지). 모두 commit 안 함.
           if (newText.trim() === '' || newText === b.text) {
             onCancel();
             (e.currentTarget as HTMLElement).innerText = b.text;
