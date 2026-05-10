@@ -24,12 +24,21 @@ export async function GET(
   let svg = entry.svgCache.get(cacheKey);
   if (!svg) {
     try {
+      const t0 = Date.now();
       const r = renderPageSvg(entry.doc, page.dict, pageIndex);
       svg = r.svg;
-      // 진단 로그 (docker logs 에 보임). 정상 페이지에도 글리프 fallback 등 정보 포함.
+      const dt = Date.now() - t0;
+      // 항상 로그 — 사용자가 어느 페이지가 얼마나 걸리는지 즉시 확인 가능
+      // eslint-disable-next-line no-console
+      console.log(
+        `[edit2me] page ${pageIndex} rendered in ${dt}ms (${svg.length} bytes${r.diagnostics.length > 0 ? `, ${r.diagnostics.length} diags` : ''})`,
+      );
       if (r.diagnostics.length > 0) {
         // eslint-disable-next-line no-console
-        console.warn(`[edit2me] page ${pageIndex} diagnostics:`, r.diagnostics.slice(0, 10).join(' | '));
+        console.warn(
+          `[edit2me] page ${pageIndex} diagnostics:`,
+          r.diagnostics.slice(0, 10).join(' | '),
+        );
       }
       // 빈 SVG 방어 — 항상 최소 viewBox 보장
       if (!svg || svg.length < 50) {

@@ -299,6 +299,9 @@ export class PdfDocument {
 
   // 페이지 콘텐츠 stream 단일 byte로 합치기 (배열이면 concat). 결과는 ref 기준 캐시.
   private contentCache = new Map<string, Uint8Array>();
+  // 추가 doc-level 캐시 (외부 모듈이 사용). e.g. fontInfo, glyph outline, decoded ttf bytes.
+  // WeakMap 사용 — 키 객체가 GC 되면 entry 도 자동 정리.
+  readonly auxCache = new WeakMap<object, unknown>();
 
   pageContent(page: PdfDict): Uint8Array {
     // 캐시 키: /Contents 의 ref(s). 값이 변경되면 재계산.
@@ -334,6 +337,8 @@ export class PdfDocument {
   // 콘텐츠 캐시 무효화 (페이지 콘텐츠 수정 후 호출)
   invalidateContentCache(): void {
     this.contentCache.clear();
+    // auxCache 는 WeakMap 이라 key 객체 살아있으면 그대로 유지.
+    // 명시적 invalidate 가 필요하면 호출자가 해당 key 를 .delete().
   }
 
   // ---- 변경 추적 ----

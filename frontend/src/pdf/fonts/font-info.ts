@@ -176,12 +176,11 @@ export function buildFontInfo(
                 const ff2Res = doc.resolve(ff2);
                 if (isStream(ff2Res)) {
                   try {
-                    const ttfBytes = decodeStream(ff2Res);
+                    const ttfBytes = ttfBytesCached(doc, ff2Res);
                     outlineCache = buildGlyphOutlineCache(ttfBytes);
-                    // unitsPerEm extraction (lightweight)
                     unitsPerEm = extractUnitsPerEm(ttfBytes) ?? 1000;
                   } catch {
-                    /* ignore — outline 사용 안 함 */
+                    /* ignore */
                   }
                 }
               }
@@ -201,7 +200,7 @@ export function buildFontInfo(
           const ff2Res = doc.resolve(ff2);
           if (isStream(ff2Res)) {
             try {
-              const ttfBytes = decodeStream(ff2Res);
+              const ttfBytes = ttfBytesCached(doc, ff2Res);
               outlineCache = buildGlyphOutlineCache(ttfBytes);
               unitsPerEm = extractUnitsPerEm(ttfBytes) ?? 1000;
             } catch {
@@ -327,6 +326,19 @@ export function buildFontInfo(
 function stripSubsetPrefix(name: string): string {
   if (name.length >= 7 && name[6] === '+') return name.slice(7);
   return name;
+}
+
+/**
+ * TTF stream 의 디코드된 byte 를 doc-level WeakMap 에 캐시.
+ * decodeStream 은 매번 zlib inflate 를 새로 — Korean PDF 의 큰 폰트 (5–20 MB) 에서
+ * 매 페이지마다 수백 ms 소요. stream 객체 identity 로 캐싱.
+ */
+function ttfBytesCached(doc: PdfDocument, stream: import('../core/object').PdfStream): Uint8Array {
+  const cached = doc.auxCache.get(stream) as Uint8Array | undefined;
+  if (cached) return cached;
+  const bytes = decodeStream(stream);
+  doc.auxCache.set(stream, bytes);
+  return bytes;
 }
 
 function extractUnitsPerEm(ttf: Uint8Array): number | null {
@@ -484,9 +496,23 @@ export function buildFontMap(doc: PdfDocument, page: PdfDict): Map<string, FontI
     const fd = doc.resolve(ref);
     if (fd.kind !== 'dict') continue;
     try {
-      out.set(name, buildFontInfo(doc, name, fd));
+      // Doc-level cache: 같은 fontDict (참조) 에 대해 buildFontInfo 1회만.
+      // 큰 한국어 PDF 에서 페이지마다 outline cache 재구축으로 인한 multi-second
+      // 지연 회피. WeakMap key 가 fontDict 객체이므로 GC 와 함께 청소.
+      let cached = doc.auxCache.get(fd) as FontInfo | undefined;
+      if (!cached) {
+        cached = buildFontInfo(doc, name, fd);
+        doc.auxCache.set(fd, cached);
+      } else {
+        // resourceName 은 페이지마다 다를 수 있음 (같은 폰트가 다른 키로 참조).
+        // 클론 없이 같은 객체 공유 — resourceName 만 본 페이지에 맞게 view.
+        if (cached.resourceName !== name) {
+          cached = { ...cached, resourceName: name };
+        }
+      }
+      out.set(name, cached);
     } catch {
-      // skip 폰트 — 안전한 fallback (다른 폰트는 처리 가능하도록)
+      // skip 폰트 — 안전한 fallback
     }
   }
   return out;
