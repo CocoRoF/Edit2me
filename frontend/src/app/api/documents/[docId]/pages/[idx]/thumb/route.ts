@@ -19,13 +19,19 @@ export async function GET(
 
   const cacheKey = `${entry.revision}:${pageIndex}`;
   let svg = entry.svgCache.get(cacheKey);
+  if (svg) {
+    process.stdout.write(
+      `[edit2me] thumb ${pageIndex} CACHE HIT (${svg.length} bytes, key=${cacheKey})\n`,
+    );
+  }
   if (!svg) {
+    process.stdout.write(`[edit2me] thumb ${pageIndex} CACHE MISS — rendering (key=${cacheKey})\n`);
     try {
       const t0 = Date.now();
       const r = renderPageSvg(entry.doc, page.dict, pageIndex);
       svg = r.svg;
       process.stdout.write(
-        `[edit2me] thumb ${pageIndex} rendered in ${Date.now() - t0}ms (${svg.length} bytes)\n`,
+        `[edit2me] thumb ${pageIndex} rendered in ${Date.now() - t0}ms (${svg.length} bytes${r.diagnostics.length > 0 ? `, ${r.diagnostics.length} diags` : ''})\n`,
       );
       if (!svg || svg.length < 50) {
         const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);

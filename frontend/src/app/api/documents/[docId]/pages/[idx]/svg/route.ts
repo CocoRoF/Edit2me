@@ -22,7 +22,13 @@ export async function GET(
 
   const cacheKey = `${entry.revision}:${pageIndex}`;
   let svg = entry.svgCache.get(cacheKey);
+  if (svg) {
+    process.stdout.write(
+      `[edit2me] page ${pageIndex} CACHE HIT (${svg.length} bytes, key=${cacheKey})\n`,
+    );
+  }
   if (!svg) {
+    process.stdout.write(`[edit2me] page ${pageIndex} CACHE MISS — rendering (key=${cacheKey})\n`);
     try {
       const t0 = Date.now();
       const r = renderPageSvg(entry.doc, page.dict, pageIndex);

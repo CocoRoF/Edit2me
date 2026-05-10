@@ -570,19 +570,40 @@ export function renderPageSvg(
     // Filter 분석
     const filters = getFilterChain(x.stream);
     const lastFilter = filters[filters.length - 1]?.name;
+    const filterChain = filters.map((f) => f.name).join('|') || '(none)';
+    const bpcDecl = asNumber(dictGet(x.dict, 'BitsPerComponent')) ?? (isImageMask ? 1 : 8);
+    const csObjForLog = dictGet(x.dict, 'ColorSpace');
+    const csForLog = csObjForLog ? doc.resolve(csObjForLog) : undefined;
+    const csName = isImageMask
+      ? 'ImageMask'
+      : csForLog && isName(csForLog)
+        ? csForLog.value
+        : csForLog && isArray(csForLog) && csForLog.items[0] && csForLog.items[0].kind === 'name'
+          ? `[${csForLog.items[0].value}]`
+          : csForLog
+            ? '(complex)'
+            : '(default)';
+    process.stdout.write(
+      `[edit2me] page ${pageIndex} image ${name} w=${w} h=${h} bpc=${bpcDecl} cs=${csName} filters=${filterChain} rawLen=${x.stream.raw.length}\n`,
+    );
     let dataUrl: string | undefined;
 
     if (lastFilter === 'DCTDecode' || lastFilter === 'DCT') {
       const b64 = base64Encode(x.stream.raw);
       dataUrl = `data:image/jpeg;base64,${b64}`;
+      process.stdout.write(`[edit2me] page ${pageIndex} image ${name} → JPEG passthrough b64Len=${b64.length}\n`);
     } else if (lastFilter === 'JPXDecode' || lastFilter === 'JPX') {
       const b64 = base64Encode(x.stream.raw);
       dataUrl = `data:image/jp2;base64,${b64}`;
+      process.stdout.write(`[edit2me] page ${pageIndex} image ${name} → JP2 passthrough b64Len=${b64.length}\n`);
     } else {
       // Raw pixel data → unpack(BitsPerComponent) → 8-bit RGB/Gray → PNG
       try {
         const decoded = decodeStream(x.stream);
         const bpc = asNumber(dictGet(x.dict, 'BitsPerComponent')) ?? 8;
+        process.stdout.write(
+          `[edit2me] page ${pageIndex} image ${name} decoded rawLen=${x.stream.raw.length} → decodedLen=${decoded.length} (bpc=${bpc})\n`,
+        );
         // Decode array (선택). 1bpp gray 의 default 는 [0, 1] (0=black, 1=white).
         const decodeObj = dictGet(x.dict, 'Decode');
         let decodeArr: number[] | null = null;
@@ -596,7 +617,16 @@ export function renderPageSvg(
         if (isImageMask) {
           // 1bpp single-channel; 0=paint with current fill, 1=transparent.
           // 단순화: 현재 fillColor 로 paint, 0/1 → opaque/transparent (PDF default Decode=[0 1]).
+          const expectedBytes = Math.ceil((w * bpc) / 8) * h;
           const unpacked = unpackBitsToBytes(decoded, w, h, 1, bpc, decodeArr ?? [0, 1]);
+          process.stdout.write(
+            `[edit2me] page ${pageIndex} image ${name} (mask) unpacked=${unpacked.length} expectedRowBytes×h=${expectedBytes} pixels=${w * h}\n`,
+          );
+          if (unpacked.length < w * h) {
+            process.stderr.write(
+              `[edit2me] page ${pageIndex} image ${name} (mask) UNDERSIZED unpacked=${unpacked.length} < ${w * h} — top-left clipping likely\n`,
+            );
+          }
           // RGBA: fill 색 + alpha 인 경우만 emit.
           const c = cur.fillColor;
           const r = Math.round(c[0] * 255), g = Math.round(c[1] * 255), b = Math.round(c[2] * 255);
@@ -610,11 +640,23 @@ export function renderPageSvg(
           }
           const png = encodePngRgba(rgba, w, h);
           dataUrl = `data:image/png;base64,${base64Encode(png)}`;
+          process.stdout.write(
+            `[edit2me] page ${pageIndex} image ${name} (mask) PNG out=${png.length} bytes\n`,
+          );
         } else {
           const csObj = dictGet(x.dict, 'ColorSpace');
           const cs = resolveImageColorSpace(doc, csObj);
           // Sample 단위 unpack (channels per pixel × bpc)
+          const expectedBytes = Math.ceil((w * cs.channels * bpc) / 8) * h;
           const samples = unpackBitsToBytes(decoded, w, h, cs.channels, bpc, decodeArr);
+          process.stdout.write(
+            `[edit2me] page ${pageIndex} image ${name} cs=${cs.kind}(ch=${cs.channels}${cs.kind === 'indexed' ? `,base=${cs.baseChannels}` : ''}) unpacked=${samples.length} expectedRowBytes×h=${expectedBytes} pixels=${w * h}\n`,
+          );
+          if (samples.length < w * h * cs.channels) {
+            process.stderr.write(
+              `[edit2me] page ${pageIndex} image ${name} UNDERSIZED unpacked=${samples.length} < ${w * h * cs.channels} — top-left clipping likely\n`,
+            );
+          }
           // ColorSpace 별로 RGB byte 배열 생성
           let pngBytes: Uint8Array;
           if (cs.kind === 'gray') {
@@ -654,6 +696,9 @@ export function renderPageSvg(
             throw new Error(`unsupported colorspace`);
           }
           dataUrl = `data:image/png;base64,${base64Encode(pngBytes)}`;
+          process.stdout.write(
+            `[edit2me] page ${pageIndex} image ${name} PNG out=${pngBytes.length} bytes\n`,
+          );
         }
       } catch (e) {
         diagnostics.add(`image-decode-failed:${name}:${(e as Error).message.slice(0, 60)}`);
