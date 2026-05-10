@@ -135,9 +135,7 @@ export function PageView({
               </>
             )}
             {onDelete && (
-              <PageActionBtn title="페이지 삭제" onClick={onDelete} danger>
-                <Trash2 size={14} />
-              </PageActionBtn>
+              <DeleteConfirmBtn onConfirm={onDelete} />
             )}
           </div>
         )}
@@ -263,59 +261,128 @@ function TextBlockEditor({
   const title = !b.editable
     ? '이 텍스트는 편집할 수 없습니다 (폰트 인코딩 미지원 또는 디코드 실패)'
     : '더블클릭하여 편집';
-  // Editing 중에만 텍스트 표시. 평소엔 클릭/hover 영역만 (SVG 가 visual 담당).
   return (
-    <span
-      className={cls}
-      style={{
-        left: `${left}px`,
-        top: `${top}px`,
-        width: `${width}px`,
-        height: `${height}px`,
-        // 평소엔 transparent text — SVG 의 글자 위에 겹치지 않게
-        color: isEditing ? 'inherit' : 'transparent',
-        background: isEditing ? undefined : undefined,
-        fontSize: `${height}px`,
-        lineHeight: 1,
-        whiteSpace: 'pre',
-        overflow: 'hidden',
-      }}
-      contentEditable={canEdit && isEditing}
-      suppressContentEditableWarning
-      onDoubleClick={(e) => {
-        if (!canEdit) return;
-        e.stopPropagation();
-        onBeginEdit();
-        setTimeout(() => {
-          const el = e.currentTarget as HTMLElement;
-          if (document.activeElement !== el) el.focus();
-          const range = document.createRange();
-          range.selectNodeContents(el);
-          const sel = window.getSelection();
-          sel?.removeAllRanges();
-          sel?.addRange(range);
-        }, 0);
-      }}
-      onBlur={(e) => {
-        if (!isEditing) return;
-        const newText = (e.currentTarget as HTMLElement).innerText;
-        onCommit(newText);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          (e.currentTarget as HTMLElement).innerText = b.text;
-          onCancel();
-          (e.currentTarget as HTMLElement).blur();
-        } else if (e.key === 'Enter') {
-          e.preventDefault();
-          (e.currentTarget as HTMLElement).blur();
-        }
-      }}
-      title={title}
-    >
-      {b.text}
-    </span>
+    <>
+      <span
+        className={cls}
+        style={{
+          left: `${left}px`,
+          top: `${top}px`,
+          width: `${width}px`,
+          height: `${height}px`,
+          color: isEditing ? 'inherit' : 'transparent',
+          fontSize: `${height}px`,
+          lineHeight: 1,
+          whiteSpace: 'pre',
+          overflow: 'hidden',
+          // 편집 중에는 hover 변색 안 되게 (이미 outline 으로 강조됨)
+          ...(isEditing
+            ? {
+                background: 'rgba(255, 255, 255, 0.95)',
+                color: 'var(--color-ink)',
+                zIndex: 20,
+              }
+            : {}),
+        }}
+        contentEditable={canEdit && isEditing}
+        suppressContentEditableWarning
+        onClick={(e) => {
+          // 편집 모드 중 단일 클릭은 텍스트 안 caret 이동만 — 페이지 activate (parent
+          // wrapper) 이벤트 차단.
+          if (isEditing) e.stopPropagation();
+        }}
+        onMouseDown={(e) => {
+          if (isEditing) e.stopPropagation();
+        }}
+        onDoubleClick={(e) => {
+          if (!canEdit) return;
+          e.stopPropagation();
+          onBeginEdit();
+          setTimeout(() => {
+            const el = e.currentTarget as HTMLElement;
+            if (document.activeElement !== el) el.focus();
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const sel = window.getSelection();
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+          }, 0);
+        }}
+        onBlur={(e) => {
+          if (!isEditing) return;
+          const newText = (e.currentTarget as HTMLElement).innerText;
+          // 빈 문자열이거나 원본과 동일 → cancel (실수 방지). 모두 commit 안 함.
+          if (newText.trim() === '' || newText === b.text) {
+            onCancel();
+            (e.currentTarget as HTMLElement).innerText = b.text;
+            return;
+          }
+          onCommit(newText);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).innerText = b.text;
+            onCancel();
+            (e.currentTarget as HTMLElement).blur();
+          } else if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).blur();
+          }
+        }}
+        title={title}
+      >
+        {b.text}
+      </span>
+      {/* 편집 중일 때 노출되는 toolbar — 위쪽에 띄움. 키보드 외에 마우스로도 저장/취소 가능.
+          mousedown 으로 onBlur 트리거되지 않도록 preventDefault. */}
+      {isEditing && (
+        <div
+          className="absolute z-30 inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-[11px] shadow-pop"
+          style={{
+            left: `${left}px`,
+            top: `${Math.max(0, top - 32)}px`,
+            background: 'var(--color-surface)',
+            border: '1px solid var(--color-line)',
+            whiteSpace: 'nowrap',
+            pointerEvents: 'auto',
+          }}
+          onMouseDown={(e) => {
+            // 마우스 down 으로 contentEditable 가 blur 되는 걸 방지.
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span className="text-[color:var(--color-muted)]">편집 중</span>
+          <span className="text-[color:var(--color-line-strong)]">·</span>
+          <button
+            className="px-1.5 py-0.5 rounded text-[color:var(--color-accent)] hover:bg-[color:var(--color-accent-soft)] font-medium"
+            onClick={(e) => {
+              e.stopPropagation();
+              const span = (e.currentTarget.parentElement?.previousElementSibling) as HTMLElement | null;
+              if (span) {
+                const newText = span.innerText;
+                if (newText.trim() === '' || newText === b.text) onCancel();
+                else onCommit(newText);
+              }
+            }}
+          >
+            저장 (Enter)
+          </button>
+          <span className="text-[color:var(--color-line-strong)]">·</span>
+          <button
+            className="px-1.5 py-0.5 rounded text-[color:var(--color-muted)] hover:bg-[color:var(--color-surface-2)]"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCancel();
+            }}
+          >
+            취소 (Esc)
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -359,6 +426,40 @@ function PageActionBtn({
       }}
     >
       {children}
+    </button>
+  );
+}
+
+// 2-step confirm 삭제 — 첫 클릭은 "확인하시겠어요?" 상태 (빨간 배경 + 메시지), 3 초 안에
+// 두 번째 클릭하면 실제 삭제. 그 사이에 다른 곳 클릭하거나 timeout 되면 reset.
+function DeleteConfirmBtn({ onConfirm }: { onConfirm: () => void }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  if (!armed) {
+    return (
+      <PageActionBtn title="페이지 삭제" onClick={() => setArmed(true)} danger>
+        <Trash2 size={14} />
+      </PageActionBtn>
+    );
+  }
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onConfirm();
+      }}
+      title="다시 클릭하여 정말 삭제 (3 초 후 취소)"
+      className="h-7 px-2 inline-flex items-center gap-1 rounded text-[11px] font-semibold transition-colors"
+      style={{
+        background: 'var(--color-danger)',
+        color: '#fff',
+      }}
+    >
+      <Trash2 size={12} /> 정말 삭제?
     </button>
   );
 }

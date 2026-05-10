@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PageMeta } from '@/lib/api';
 import { thumbUrl } from '@/lib/api';
 import { Trash2, Layers, X, GripVertical } from 'lucide-react';
@@ -157,10 +157,9 @@ function SidebarBody(props: BaseProps) {
         </div>
         {selected.size > 0 && (
           <div className="flex gap-0.5">
-            {/* 회전은 캔버스 쪽 페이지별 액션으로 이동. 사이드바엔 일괄 삭제만 유지. */}
-            <IconBtn title="삭제" onClick={() => onDelete([...selected])} danger>
-              <Trash2 size={13} />
-            </IconBtn>
+            {/* 회전은 캔버스 쪽 페이지별 액션으로 이동. 사이드바엔 일괄 삭제만 유지.
+                실수 클릭 방지를 위해 2-step confirm. */}
+            <SidebarDeleteBtn count={selected.size} onConfirm={() => onDelete([...selected])} />
           </div>
         )}
       </div>
@@ -365,6 +364,32 @@ function DragPreview({
       </div>
       {void originalIndex}
     </div>
+  );
+}
+
+function SidebarDeleteBtn({ count, onConfirm }: { count: number; onConfirm: () => void }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  if (!armed) {
+    return (
+      <IconBtn title={`${count}개 페이지 삭제`} onClick={() => setArmed(true)} danger>
+        <Trash2 size={13} />
+      </IconBtn>
+    );
+  }
+  return (
+    <button
+      onClick={onConfirm}
+      title="다시 클릭하여 정말 삭제 (3 초 후 취소)"
+      className="h-7 px-2 inline-flex items-center gap-1 rounded text-[11px] font-semibold"
+      style={{ background: 'var(--color-danger)', color: '#fff' }}
+    >
+      <Trash2 size={11} /> {count}개 정말 삭제?
+    </button>
   );
 }
 
