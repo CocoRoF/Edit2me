@@ -37,7 +37,10 @@ export interface OpResult {
 }
 
 export interface TextBlock {
+  /** primary segment id — 단일 segment 일 때는 segment id 와 동일. */
   blockId: string;
+  /** 그룹 안의 모든 underlying segment id 들. group edit 시 서버에 전송. */
+  blockIds: string[];
   text: string;
   x: number;
   y: number;

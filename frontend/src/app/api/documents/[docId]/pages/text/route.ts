@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDoc, getPageText } from '@/lib/doc-cache';
+import { groupRuns } from '@/pdf/graphics/text-group';
 
 export const runtime = 'nodejs';
 
@@ -47,6 +48,7 @@ export async function GET(
     rotate: number;
     blocks: Array<{
       blockId: string;
+      blockIds: string[];
       text: string;
       x: number;
       y: number;
@@ -68,25 +70,29 @@ export async function GET(
     const pages = entry.doc.getPages();
     const page = pages[i]!;
     const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);
+    // 시각 단위로 grouping: 같은 baseline + 같은 폰트 + 인접 segment → 하나의 박스.
+    // 사용자에게 "한 줄짜리 단어/구절" 이 한 box 로 보이고, 그룹 단위 편집.
+    const groups = groupRuns(result.runs);
     out.push({
       pageIndex: i,
       width: urx - llx,
       height: ury - lly,
       rotate: entry.doc.pageRotation(page.dict),
-      blocks: result.runs.map((r) => ({
-        blockId: r.blockId,
-        text: r.text,
-        x: r.x,
-        y: r.y,
-        width: r.width,
-        height: r.height,
-        fontBaseName: r.fontBaseName,
-        fontSize: r.fontSize,
-        isComposite: r.isComposite,
-        fullyDecoded: r.fullyDecoded,
-        // 편집 가능 = 완전히 디코드 + 폰트가 새 텍스트 인코딩 지원. composite 도 Identity
-        // CIDToGIDMap + 임베디드 TTF 면 인코딩 가능 (한글 등).
-        editable: r.fullyDecoded && r.fontEncodable,
+      blocks: groups.map((g) => ({
+        // 그룹의 primary id 가 blockId 가 됨. 편집 commit 시 backend 가 blockIds 로 group edit.
+        blockId: g.groupId,
+        blockIds: g.blockIds,
+        text: g.text,
+        x: g.x,
+        y: g.y,
+        width: g.width,
+        height: g.height,
+        fontBaseName: g.fontBaseName,
+        fontSize: g.fontSize,
+        isComposite: g.isComposite,
+        fullyDecoded: g.fullyDecoded,
+        // 편집 가능 = 그룹 내부 모두 디코드 가능 + 폰트 인코딩 가능 + 같은 op (group-edit OK).
+        editable: g.fullyDecoded && g.fontEncodable && g.groupEditable,
       })),
       fontWarnings: result.fontDiagnostics
         .filter((f) => f.warnings.length > 0)

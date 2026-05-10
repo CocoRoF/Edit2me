@@ -262,7 +262,8 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
       setScrollToIndex(null);
     });
     return () => cancelAnimationFrame(id);
-  }, [scrollToIndex, meta?.revision]);
+    // scrollToIndex 만 dep — sidebar 클릭처럼 revision 변화 없이도 트리거되어야 함.
+  }, [scrollToIndex]);
 
   const handleInsertPdf = useCallback(
     async (file: File, insertAt: number) => {
@@ -349,9 +350,14 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
     runOps([{ op: 'delete-pages', indices }], indices.length > 0 ? indices[0] : undefined);
   const handleRotate = (indices: number[], angle: 90 | -90) =>
     runOps([{ op: 'rotate-pages', indices, angle }], indices.length > 0 ? indices[0] : undefined);
-  // pageIndex 를 명시적으로 받음 — 비active 페이지의 텍스트 편집도 안전.
-  const handleEditText = (pageIndex: number, blockId: string, newText: string) =>
-    runOps([{ op: 'edit-text', pageIndex, blockId, newText }], pageIndex);
+  // pageIndex + blockIds 를 명시적으로 받음. blockIds 길이 > 1 이면 group edit, 아니면
+  // 단일 segment edit. 비active 페이지의 텍스트도 안전.
+  const handleEditText = (pageIndex: number, blockIds: string[], newText: string) => {
+    if (blockIds.length > 1) {
+      return runOps([{ op: 'edit-text-group', pageIndex, blockIds, newText }], pageIndex);
+    }
+    return runOps([{ op: 'edit-text', pageIndex, blockId: blockIds[0]!, newText }], pageIndex);
+  };
 
   const handleCanvasClick = (pageIndex: number, x: number, y: number) => {
     if (!addTextMode) return;
@@ -458,7 +464,11 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
           activeIndex={activeIndex}
           selected={selected}
           onSelect={handleSelect}
-          onActivate={setActive}
+          onActivate={(i) => {
+            // 사이드바에서 페이지 클릭 시 active 변경 + main canvas 도 그 페이지로 scroll.
+            setActive(i);
+            setScrollToIndex(i);
+          }}
           onReorder={handleReorder}
           onDelete={handleDelete}
           reload={reload}
@@ -470,7 +480,11 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
           activeIndex={activeIndex}
           selected={selected}
           onSelect={handleSelect}
-          onActivate={setActive}
+          onActivate={(i) => {
+            // 사이드바에서 페이지 클릭 시 active 변경 + main canvas 도 그 페이지로 scroll.
+            setActive(i);
+            setScrollToIndex(i);
+          }}
           onReorder={handleReorder}
           onDelete={handleDelete}
           reload={reload}
@@ -495,7 +509,7 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
                 revision={meta.revision}
                 displayIndex={i + 1}
                 totalPages={meta.pages.length}
-                onEditText={(blockId, newText) => handleEditText(i, blockId, newText)}
+                onEditText={(blockIds, newText) => handleEditText(i, blockIds, newText)}
                 onCanvasClick={addTextMode ? handleCanvasClick : undefined}
                 addTextMode={addTextMode && p.index === activeIndex}
                 active={p.index === activeIndex}

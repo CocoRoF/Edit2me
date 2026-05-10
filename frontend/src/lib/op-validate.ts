@@ -126,6 +126,23 @@ function validateOne(v: unknown): { ok: boolean; error?: string; op?: Op } {
           newText: o.newText,
         },
       };
+    case 'edit-text-group':
+      if (typeof o.pageIndex !== 'number') return { ok: false, error: 'pageIndex required' };
+      if (!Array.isArray(o.blockIds) || o.blockIds.length === 0)
+        return { ok: false, error: 'blockIds required' };
+      if (o.blockIds.some((b) => typeof b !== 'string' || b.length === 0))
+        return { ok: false, error: 'blockIds must be non-empty strings' };
+      if (typeof o.newText !== 'string') return { ok: false, error: 'newText required' };
+      if (o.newText.length > 10_000) return { ok: false, error: 'newText too long' };
+      return {
+        ok: true,
+        op: {
+          op: 'edit-text-group',
+          pageIndex: o.pageIndex,
+          blockIds: o.blockIds as string[],
+          newText: o.newText,
+        },
+      };
     default:
       return { ok: false, error: `unknown op: ${String(o.op)}` };
   }
