@@ -321,8 +321,9 @@ export function renderPageSvg(
 
   function registerClipFromPath(evenOdd: boolean): string {
     const id = `c${pageIndex}-${clipCounter++}`;
+    // clip-rule 은 path 자식 element 에 — 일부 브라우저는 clipPath 부모 attr 를 무시.
     const rule = evenOdd ? ' clip-rule="evenodd"' : '';
-    defs.push(`<clipPath id="${id}"${rule}><path d="${path.segs.join(' ')}"/></clipPath>`);
+    defs.push(`<clipPath id="${id}"><path d="${path.segs.join(' ')}"${rule}/></clipPath>`);
     return id;
   }
 
@@ -636,8 +637,7 @@ export function renderPageSvg(
       } catch (e) {
         const msg = `op-failed:${op.op}:${(e as Error).message.slice(0, 80)}`;
         diagnostics.add(msg);
-        // eslint-disable-next-line no-console
-        console.error(`[edit2me] page ${pageIndex} op ${op.op}:`, (e as Error).stack ?? e);
+        process.stderr.write(`[edit2me] page ${pageIndex} op ${op.op}: ${(e as Error).stack ?? e}\n`);
       }
     }
   }
@@ -903,12 +903,15 @@ export function renderPageSvg(
   runOpsScope(ops, 0);
 
   const contentSvg = out.join('\n');
+  // ⚠ defs (clipPath, symbol) 를 outer flip group *안* 에 둬야 user space 가 일관.
+  // 바깥 (svg root) 에 두면 clipPath path 좌표가 PDF y-up 으로 emit 됐는데 평가 시
+  // SVG y-down 으로 해석되어 *상하 반전* + clip 영역이 잘못된 위치 → 페이지 콘텐츠
+  // 가 *얇은 라인* (예: 1pt clip path) 안에서만 보이는 증상.
   const defsSvg = defs.length > 0 ? `<defs>${defs.join('')}</defs>` : '';
-  // Outer flip: PDF y-up → SVG y-down
-  const flipped = `<g transform="matrix(1,0,0,-1,${fmt(-llx)},${fmt(ury)})">${contentSvg}</g>`;
+  // Outer flip: PDF y-up → SVG y-down. defs 도 같은 group 안.
+  const flipped = `<g transform="matrix(1,0,0,-1,${fmt(-llx)},${fmt(ury)})">${defsSvg}${contentSvg}</g>`;
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fmt(W)} ${fmt(H)}" width="100%" height="100%" preserveAspectRatio="xMinYMin meet">` +
-    defsSvg +
     `<rect width="100%" height="100%" fill="white"/>` +
     flipped +
     `</svg>`;
