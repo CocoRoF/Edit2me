@@ -24,17 +24,34 @@ export async function GET(
   let svg = entry.svgCache.get(cacheKey);
   if (!svg) {
     try {
-      svg = renderPageSvg(entry.doc, page.dict, pageIndex).svg;
+      const r = renderPageSvg(entry.doc, page.dict, pageIndex);
+      svg = r.svg;
+      // 진단 로그 (docker logs 에 보임). 정상 페이지에도 글리프 fallback 등 정보 포함.
+      if (r.diagnostics.length > 0) {
+        // eslint-disable-next-line no-console
+        console.warn(`[edit2me] page ${pageIndex} diagnostics:`, r.diagnostics.slice(0, 10).join(' | '));
+      }
+      // 빈 SVG 방어 — 항상 최소 viewBox 보장
+      if (!svg || svg.length < 50) {
+        const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);
+        const w = urx - llx;
+        const h = ury - lly;
+        svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="white"/></svg>`;
+        // eslint-disable-next-line no-console
+        console.warn(`[edit2me] page ${pageIndex} produced empty SVG`);
+      }
       entry.svgCache.set(cacheKey, svg);
       if (entry.svgCache.size > 256) {
         const oldest = entry.svgCache.keys().next().value;
         if (oldest) entry.svgCache.delete(oldest);
       }
     } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[edit2me] page ${pageIndex} render threw:`, (e as Error).stack ?? e);
       const [llx, lly, urx, ury] = entry.doc.pageMediaBox(page.dict);
       const w = urx - llx;
       const h = ury - lly;
-      svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="#fef3c7"/><text x="50%" y="50%" text-anchor="middle" font-size="${Math.min(w, h) / 24}" fill="#92400e">page ${pageIndex + 1} render failed: ${(e as Error).message.slice(0, 100)}</text></svg>`;
+      svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="#fef3c7"/><text x="50%" y="50%" text-anchor="middle" font-size="${Math.min(w, h) / 24}" fill="#92400e">page ${pageIndex + 1}: ${(e as Error).message.slice(0, 100)}</text></svg>`;
     }
   }
   return new Response(svg, {

@@ -83,7 +83,15 @@ RUN git clone --depth 1 --branch "${EDIT2ME_REF}" "${EDIT2ME_REPO}" /tmp/edit2me
  && cp -r /tmp/edit2me/frontend/src/. /app/ \
  && mkdir -p /app/scripts \
  && cp /tmp/edit2me/scripts/build-cmaps.mjs /app/scripts/ 2>/dev/null || true \
+ && (cd /tmp/edit2me && git rev-parse HEAD > /app/.edit2me-sha 2>/dev/null || echo unknown > /app/.edit2me-sha) \
  && rm -rf /tmp/edit2me
+
+# build/runtime 시 사용 가능한 git SHA + 빌드 시점
+ENV EDIT2ME_GIT_SHA_FILE=/app/.edit2me-sha
+RUN export EDIT2ME_GIT_SHA="$(cat /app/.edit2me-sha)" \
+ && export EDIT2ME_BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+ && echo "EDIT2ME_GIT_SHA=$EDIT2ME_GIT_SHA" >> /app/.env.local \
+ && echo "EDIT2ME_BUILT_AT=$EDIT2ME_BUILT_AT" >> /app/.env.local
 
 RUN npm install --no-audit --no-fund
 

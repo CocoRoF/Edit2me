@@ -634,7 +634,10 @@ export function renderPageSvg(
       try {
         runOneOp(op, depth);
       } catch (e) {
-        diagnostics.add(`op-failed:${op.op}:${(e as Error).message.slice(0, 60)}`);
+        const msg = `op-failed:${op.op}:${(e as Error).message.slice(0, 80)}`;
+        diagnostics.add(msg);
+        // eslint-disable-next-line no-console
+        console.error(`[edit2me] page ${pageIndex} op ${op.op}:`, (e as Error).stack ?? e);
       }
     }
   }

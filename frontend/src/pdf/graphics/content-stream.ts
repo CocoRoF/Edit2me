@@ -111,11 +111,67 @@ export function parseContent(data: Uint8Array): ContentOpWithSource[] {
     if (t.type === 'eof') break;
     if (t.type === 'keyword') {
       const kw = t.value as string;
-      // Inline image: BI 부터 EI 까지의 본문은 임의 binary 라 일반 토크나이저로 파싱
-      // 시도하면 잘못된 op 가 생성되거나 무한 loop 가능. EI 키워드를 raw byte 검색으로 skip.
+      // Inline image: BI <<dict>> ID <binary> EI
+      // 1) BI 와 ID 사이는 PDF 토큰 (key/value pair). /Length 키 추출 시 binary 길이 확정.
+      // 2) ID 직후 1개 EOL 다음부터 binary 데이터.
+      // 3) /Length 가 있으면 정확히 그 byte 후 EI. 없으면 raw EI 검색 (binary 안의
+      //    우연 'EI' 일치 위험 있으나 fallback).
       if (kw === 'BI') {
-        const eiPos = findKeywordRaw(data, tk.pos, 'EI');
-        if (eiPos < 0) break; // 끝까지 EI 없음 — 손상
+        let inlineLength: number | undefined;
+        // dict 내용을 토큰 단위로 진행하며 'ID' 키워드 만날 때까지 흡수.
+        // 키/값 pair 를 누적해 /Length 검출.
+        let key: string | null = null;
+        outerBI: while (true) {
+          const it = tk.next();
+          if (it.type === 'eof') break outerBI;
+          if (it.type === 'keyword' && it.value === 'ID') break outerBI;
+          if (it.type === 'name') {
+            if (key === null) key = it.value as string;
+            else key = it.value as string; // 비표준이지만 안전
+          } else if (it.type === 'int' || it.type === 'real') {
+            if (key === 'Length' || key === 'L') {
+              inlineLength = it.value as number;
+            }
+            key = null;
+          } else {
+            // string/array/dict 등 — value 로 처리, key 리셋
+            key = null;
+          }
+        }
+        // ID 직후 1 EOL skip
+        let bodyStart = tk.pos;
+        if (data[bodyStart] === 0x0d) {
+          bodyStart += 1;
+          if (data[bodyStart] === 0x0a) bodyStart += 1;
+        } else if (data[bodyStart] === 0x0a) {
+          bodyStart += 1;
+        } else if (data[bodyStart] === 0x20) {
+          bodyStart += 1;
+        }
+        let eiPos: number;
+        if (inlineLength !== undefined) {
+          // /Length 정확값 — body 끝 직후 EI 가 와야.
+          const expectedEnd = bodyStart + inlineLength;
+          // EI 직전 EOL 또는 공백 허용
+          let p = expectedEnd;
+          while (p < data.length && (data[p] === 0x20 || data[p] === 0x0a || data[p] === 0x0d)) p += 1;
+          if (p + 1 < data.length && data[p] === 0x45 && data[p + 1] === 0x49) {
+            eiPos = p;
+          } else {
+            // /Length 거짓 — fallback raw scan
+            eiPos = findKeywordRaw(data, bodyStart, 'EI');
+          }
+        } else {
+          eiPos = findKeywordRaw(data, bodyStart, 'EI');
+        }
+        if (eiPos < 0) {
+          // EI 못 찾음 — content stream 손상. BI op 만 push 후 종료.
+          out.push({
+            op: { op: 'BI' },
+            source: { start: opStartByte, end: data.length, opIndex: out.length },
+          });
+          break;
+        }
         out.push({
           op: { op: 'BI' },
           source: { start: opStartByte, end: eiPos + 2, opIndex: out.length },
