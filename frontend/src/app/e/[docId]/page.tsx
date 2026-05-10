@@ -405,9 +405,11 @@ function EditorPage({ params }: { params: Promise<{ docId: string }> }) {
             meta.pages.map((p) => (
               <PageView
                 key={`${p.index}-${reload}`}
+                docId={docId}
                 page={p}
                 pageText={pageTexts.get(p.index) ?? null}
                 zoom={zoom}
+                revision={meta.revision}
                 onEditText={p.index === activeIndex ? handleEditText : undefined}
                 onCanvasClick={addTextMode ? handleCanvasClick : undefined}
                 addTextMode={addTextMode && p.index === activeIndex}
