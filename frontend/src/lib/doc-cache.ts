@@ -33,6 +33,8 @@ interface DocEntry {
   originalBytes: Uint8Array;
   /** 이 doc 에 업로드된 TTF (uploadId → font). */
   uploadedFonts: Map<string, UploadedFont>;
+  /** 페이지 SVG 렌더 결과 캐시. key = `${revision}:${pageIndex}`. */
+  svgCache: Map<string, string>;
 }
 
 const cache = new Map<string, DocEntry>();
@@ -60,6 +62,7 @@ export async function registerNewDoc(
     textCache: new Map(),
     originalBytes: buf,
     uploadedFonts: new Map(),
+    svgCache: new Map(),
   };
   cache.set(docId, entry);
   evictIfNeeded();
@@ -89,6 +92,7 @@ export async function getDoc(docId: string): Promise<DocEntry | null> {
     textCache: new Map(),
     originalBytes: buf,
     uploadedFonts: new Map(),
+    svgCache: new Map(),
   };
   cache.set(docId, entry);
   evictIfNeeded();
@@ -287,6 +291,7 @@ export async function rebaseDoc(
     textCache: new Map(),
     originalBytes: bytes,
     uploadedFonts: new Map(),
+    svgCache: new Map(),
   };
   cache.set(docId, entry);
 }

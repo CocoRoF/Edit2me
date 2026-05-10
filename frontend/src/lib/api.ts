@@ -143,6 +143,11 @@ export function thumbUrl(docId: string, idx: number, w = 200): string {
   return apiUrl(`/api/documents/${docId}/pages/${idx}/thumb?w=${w}`);
 }
 
+export function svgUrl(docId: string, idx: number, revision = 0): string {
+  // revision 을 query 로 — 캐시 무효화에 활용
+  return apiUrl(`/api/documents/${docId}/pages/${idx}/svg?r=${revision}`);
+}
+
 import type { Op } from '@/pdf/ops/types';
 
 export async function applyOps(

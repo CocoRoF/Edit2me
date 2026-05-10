@@ -1,65 +1,50 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { PageMeta, PageText, TextBlock } from '@/lib/api';
+import { svgUrl } from '@/lib/api';
 import { useIntersection } from '@/hooks/useIntersection';
 
 interface Props {
+  docId: string;
   page: PageMeta;
   pageText: PageText | null;
   zoom: number;
+  revision: number;
   onEditText?: (blockId: string, newText: string) => void;
   onCanvasClick?: (pageIndex: number, x: number, y: number) => void;
   addTextMode?: boolean;
   active?: boolean;
 }
 
-const FONT_MAP: Record<string, string> = {
-  Helvetica: 'system-ui, -apple-system, "Helvetica Neue", sans-serif',
-  'Helvetica-Bold': 'system-ui, -apple-system, "Helvetica Neue", sans-serif',
-  'Helvetica-Oblique': 'system-ui, -apple-system, "Helvetica Neue", sans-serif',
-  'Helvetica-BoldOblique': 'system-ui, -apple-system, "Helvetica Neue", sans-serif',
-  'Times-Roman': '"Times New Roman", Times, serif',
-  'Times-Bold': '"Times New Roman", Times, serif',
-  'Times-Italic': '"Times New Roman", Times, serif',
-  'Times-BoldItalic': '"Times New Roman", Times, serif',
-  Courier: '"Courier New", Courier, monospace',
-  'Courier-Bold': '"Courier New", Courier, monospace',
-  'Courier-Oblique': '"Courier New", Courier, monospace',
-  'Courier-BoldOblique': '"Courier New", Courier, monospace',
-};
-
-function fontFamilyFor(baseName: string, isComposite: boolean): string {
-  if (FONT_MAP[baseName]) return FONT_MAP[baseName]!;
-  if (isComposite) {
-    return '"Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "Hiragino Sans", "Yu Gothic", sans-serif';
-  }
-  return 'system-ui, sans-serif';
-}
-
 export function PageView({
+  docId,
   page,
   pageText,
   zoom,
+  revision,
   onEditText,
   onCanvasClick,
   addTextMode,
   active,
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [ref, inView] = useIntersection<HTMLDivElement>('800px');
+  const [ref, inView] = useIntersection<HTMLDivElement>('1000px');
+  const [svgLoaded, setSvgLoaded] = useState(false);
 
   const w = page.width * zoom;
   const h = page.height * zoom;
   const rotate = page.rotate ?? 0;
 
-  // 가상화: paper 외곽은 항상 렌더 (스크롤/레이아웃 안정), 내용물은 inView일 때만.
-  const renderText = inView && pageText !== null;
+  // SVG src — inView 일 때만 fetch (lazy via <object> data 자체가 lazy하지 않으므로 attribute swap)
+  const src = inView ? svgUrl(docId, page.index, revision) : '';
 
+  // 회전된 페이지 visual bbox: 90/270 도면 W,H 가 swap
+  // 그러나 SVG element 자체는 page native dims; CSS transform 으로 회전.
   return (
     <div
       ref={ref}
-      className="paper relative"
+      className="relative paper"
       style={{
         width: w,
         height: h,
@@ -68,49 +53,57 @@ export function PageView({
       }}
       onDoubleClick={(e) => {
         if (!addTextMode || !onCanvasClick) return;
-        // 회전 보정: 화면 click → PDF MediaBox 좌표 (D4 fix).
-        // getBoundingClientRect는 *시각적* (rotation 후) bbox를 돌려줌.
-        // PDF 좌표는 좌하 원점, y는 위로, MediaBox 회전 전 기준.
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-        const cx = (e.clientX - rect.left) / zoom; // [0, Vw/zoom]
-        const cy = (e.clientY - rect.top) / zoom; // [0, Vh/zoom]
+        const cx = (e.clientX - rect.left) / zoom;
+        const cy = (e.clientY - rect.top) / zoom;
         const W = page.width;
         const H = page.height;
         let x: number;
         let y: number;
         switch (rotate) {
           case 90:
-            x = cy;
-            y = cx;
-            break;
+            x = cy; y = cx; break;
           case 180:
-            x = W - cx;
-            y = cy;
-            break;
+            x = W - cx; y = cy; break;
           case 270:
-            x = W - cy;
-            y = H - cx;
-            break;
+            x = W - cy; y = H - cx; break;
           default:
-            x = cx;
-            y = H - cy;
+            x = cx; y = H - cy;
         }
         onCanvasClick(page.index, x, y);
       }}
     >
-      {!pageText && (
-        // 데이터 자체가 없는 경우 (서버 응답 대기) — shimmer
-        <SkeletonContent width={w} height={h} />
+      {/* Layer 1: SVG vector render (도형/이미지/텍스트) */}
+      {inView && (
+        <img
+          src={src}
+          alt={`page ${page.index + 1}`}
+          width={w}
+          height={h}
+          draggable={false}
+          onLoad={() => setSvgLoaded(true)}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            display: 'block',
+            pointerEvents: 'none',
+            userSelect: 'none',
+          }}
+        />
       )}
-      {renderText &&
+      {/* Layer 2: invisible text overlay for inline editing */}
+      {pageText &&
+        active &&
         pageText.blocks.map((b) => (
-          <TextBlockView
+          <TextBlockEditor
             key={b.blockId}
             block={b}
             pageHeight={page.height}
             zoom={zoom}
-            isEditing={editingId === b.blockId && !!active}
-            canEdit={!!onEditText && b.editable && !!active}
+            isEditing={editingId === b.blockId}
+            canEdit={!!onEditText && b.editable}
             onBeginEdit={() => setEditingId(b.blockId)}
             onCommit={(newText) => {
               setEditingId(null);
@@ -119,36 +112,20 @@ export function PageView({
             onCancel={() => setEditingId(null)}
           />
         ))}
+      {/* SVG 로딩 전 회색 깜빡임 방지 */}
+      {!svgLoaded && inView && (
+        <div
+          className="absolute inset-0 flex items-center justify-center text-xs text-[color:var(--color-muted-2)]"
+          style={{ pointerEvents: 'none' }}
+        >
+          렌더 중…
+        </div>
+      )}
     </div>
   );
 }
 
-function SkeletonContent({ width, height }: { width: number; height: number }) {
-  const lines: Array<{ x: number; y: number; w: number; h: number }> = [];
-  let y = 60;
-  while (y < height - 80) {
-    const blockLines = 3 + Math.floor((y * 31) % 5);
-    for (let i = 0; i < blockLines; i += 1) {
-      const widthRatio = 0.5 + (((y + i) * 13) % 40) / 100;
-      lines.push({ x: 60, y, w: (width - 120) * widthRatio, h: 12 });
-      y += 22;
-    }
-    y += 28;
-  }
-  return (
-    <>
-      {lines.map((l, i) => (
-        <div
-          key={i}
-          className="skeleton absolute"
-          style={{ left: l.x, top: l.y, width: l.w, height: l.h }}
-        />
-      ))}
-    </>
-  );
-}
-
-function TextBlockView({
+function TextBlockEditor({
   block: b,
   pageHeight,
   zoom,
@@ -167,34 +144,32 @@ function TextBlockView({
   onCommit: (newText: string) => void;
   onCancel: () => void;
 }) {
-  const fontFamily = fontFamilyFor(b.fontBaseName, b.isComposite);
-  const fontWeight = b.fontBaseName.toLowerCase().includes('bold') ? 600 : 400;
-  const fontStyle =
-    b.fontBaseName.toLowerCase().includes('italic') ||
-    b.fontBaseName.toLowerCase().includes('oblique')
-      ? 'italic'
-      : 'normal';
   const left = b.x * zoom;
   const top = (pageHeight - b.y - b.height) * zoom;
-  const fontSize = b.fontSize * zoom;
+  const width = Math.max(0, b.width * zoom);
+  const height = Math.max(8, b.height * zoom);
   const cls = `text-block ${canEdit ? 'editable' : 'readonly'} ${isEditing ? 'editing' : ''}`;
   const title = !b.editable
     ? b.isComposite
       ? '복합 폰트 (CID-keyed) — v1에서 편집 불가'
       : '디코드 불가 텍스트 — 편집 비활성화'
     : '더블클릭하여 편집';
-
+  // Editing 중에만 텍스트 표시. 평소엔 클릭/hover 영역만 (SVG 가 visual 담당).
   return (
     <span
       className={cls}
       style={{
         left: `${left}px`,
         top: `${top}px`,
-        fontFamily,
-        fontSize: `${fontSize}px`,
-        fontWeight,
-        fontStyle,
-        minWidth: `${Math.max(0, b.width * zoom)}px`,
+        width: `${width}px`,
+        height: `${height}px`,
+        // 평소엔 transparent text — SVG 의 글자 위에 겹치지 않게
+        color: isEditing ? 'inherit' : 'transparent',
+        background: isEditing ? undefined : undefined,
+        fontSize: `${height}px`,
+        lineHeight: 1,
+        whiteSpace: 'pre',
+        overflow: 'hidden',
       }}
       contentEditable={canEdit && isEditing}
       suppressContentEditableWarning
