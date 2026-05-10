@@ -262,57 +262,85 @@ export function renderPageSvg(
     const font = ts.Tf;
     if (!font || ts.Tfs === 0) return;
     const decoded = font.decodeBytes(bytes);
-    let text = '';
-    let advanceWidth = 0;
     const horizScale = ts.Tz / 100;
-    for (let i = 0; i < decoded.codes.length; i += 1) {
-      const code = decoded.codes[i]!;
-      const u = font.toUnicode(code);
-      text += u ?? ' ';
-      const w = font.widthOf(code) / 1000;
-      advanceWidth +=
-        (w * ts.Tfs + ts.Tc + (decoded.lengths[i] === 1 && code === 0x20 ? ts.Tw : 0)) *
-        horizScale;
-    }
-    if (text.length === 0) return;
     if (ts.Tr === 3) {
-      // invisible (used for OCR'd PDFs) — text matrix만 advance
-      cur.Tm = mul([1, 0, 0, 1, advanceWidth, 0] as Mat6, cur.Tm);
+      let adv = 0;
+      for (let i = 0; i < decoded.codes.length; i += 1) {
+        const code = decoded.codes[i]!;
+        const w = font.widthOf(code) / 1000;
+        adv +=
+          (w * ts.Tfs + ts.Tc + (decoded.lengths[i] === 1 && code === 0x20 ? ts.Tw : 0)) *
+          horizScale;
+      }
+      cur.Tm = mul([1, 0, 0, 1, adv, 0] as Mat6, cur.Tm);
       return;
-    }
-    // text rendering matrix = [Tfs*Tz, 0, 0, Tfs, 0, Trise] × Tm × CTM
-    const textM: Mat6 = [ts.Tfs * horizScale, 0, 0, ts.Tfs, 0, ts.Trise];
-    const wm = mul(textM, ts.Tm);
-    const final = mul(wm, ts.ctm);
-    // <text> 는 SVG 좌표계에서 baseline 기준. 우리 outer flip 안에 있으니 텍스트 자체는 다시 y-flip.
-    // transform = final 의 외부 flip 보정: outer flip × final = (1,0,0,-1,0,H) × final
-    // 즉 svg 위치 = (final.e, H - final.f) 이고 글리프 자체는 y-flip 필요.
-    // 단순화: final 매트릭스를 그대로 transform 으로 emit + 추가 y-flip(local)
-    // matrix(a, b, c, d, e, f) — column-major SVG.
-    // 우리 final = [a b c d e f]. y-flip 추가 = matrix(a, b, -c, -d, e, f)? 아니, 글리프 outline 은
-    // <text> 가 자기 좌표계(font scale, y-up baseline) 에서 그려짐. SVG <text>는 y가 down 이므로
-    // 우리는 flip 안에 있을 때 글리프가 거꾸로 그려진다.
-    //
-    // 해결: 외곽 flip 이 적용된 상태에서 final 좌표만으로 위치 잡고, 텍스트 로컬에 한 번 더 y-flip.
-    // → transform = matrix(a, b, c, d, e, f) × matrix(1, 0, 0, -1, 0, 0) = matrix(a, b, -c, -d, e, f)
-    const a = final[0], b = final[1], c = final[2], d = final[3], e = final[4], f = final[5];
-    const transform = `matrix(${fmt(a)},${fmt(b)},${fmt(-c)},${fmt(-d)},${fmt(e)},${fmt(f)})`;
-
-    const fontFamily = fontFamilyFor(font.baseName, font.isComposite);
-    const styleParts: string[] = [`font-family:${fontFamily}`, `font-size:1px`];
-    if (font.baseName.toLowerCase().includes('bold')) styleParts.push('font-weight:bold');
-    if (
-      font.baseName.toLowerCase().includes('italic') ||
-      font.baseName.toLowerCase().includes('oblique')
-    ) {
-      styleParts.push('font-style:italic');
     }
     const fillC = cur.fillColor;
     const fill = colorRgb01(fillC[0], fillC[1], fillC[2]);
-    out.push(
-      `<text${clipAttr()} transform="${transform}" style="${styleParts.join(';')};fill:${fill}" xml:space="preserve">${escapeXml(text)}</text>`,
-    );
-    cur.Tm = mul([1, 0, 0, 1, advanceWidth, 0] as Mat6, cur.Tm);
+    const fontFamily = fontFamilyFor(font.baseName, font.isComposite);
+    const useOutline = !!font.glyphOutline;
+    const upe = font.unitsPerEm || 1000;
+
+    let glyphTm: Mat6 = [...ts.Tm] as Mat6;
+    let textBuf = '';
+    let textTransform = '';
+    function flushTextRun(): void {
+      if (textBuf === '') return;
+      out.push(
+        `<text${clipAttr()} transform="${textTransform}" style="font-family:${fontFamily};font-size:1px;fill:${fill}" xml:space="preserve">${escapeXml(textBuf)}</text>`,
+      );
+      textBuf = '';
+    }
+
+    for (let i = 0; i < decoded.codes.length; i += 1) {
+      const code = decoded.codes[i]!;
+      const w = font.widthOf(code) / 1000;
+      const advanceX =
+        (w * ts.Tfs + ts.Tc + (decoded.lengths[i] === 1 && code === 0x20 ? ts.Tw : 0)) *
+        horizScale;
+
+      if (useOutline) {
+        const path = font.glyphOutline!(code);
+        if (path) {
+          const textM: Mat6 = [
+            (ts.Tfs * horizScale) / upe,
+            0,
+            0,
+            ts.Tfs / upe,
+            0,
+            ts.Trise,
+          ];
+          const wm = mul(textM, glyphTm);
+          const final = mul(wm, ts.ctm);
+          // outer flip 보정 위해 자체 y-flip
+          const transform = `matrix(${fmt(final[0])},${fmt(final[1])},${fmt(-final[2])},${fmt(-final[3])},${fmt(final[4])},${fmt(final[5])})`;
+          out.push(
+            `<path${clipAttr()} d="${path}" transform="${transform}" fill="${fill}"${cur.alpha < 1 ? ` fill-opacity="${fmt(cur.alpha)}"` : ''}/>`,
+          );
+        } else {
+          const u = font.toUnicode(code) ?? ' ';
+          const textM: Mat6 = [ts.Tfs * horizScale, 0, 0, ts.Tfs, 0, ts.Trise];
+          const wm = mul(textM, glyphTm);
+          const final = mul(wm, ts.ctm);
+          const transform = `matrix(${fmt(final[0])},${fmt(final[1])},${fmt(-final[2])},${fmt(-final[3])},${fmt(final[4])},${fmt(final[5])})`;
+          out.push(
+            `<text${clipAttr()} transform="${transform}" style="font-family:${fontFamily};font-size:1px;fill:${fill}" xml:space="preserve">${escapeXml(u)}</text>`,
+          );
+        }
+      } else {
+        const u = font.toUnicode(code) ?? ' ';
+        if (textBuf === '') {
+          const textM: Mat6 = [ts.Tfs * horizScale, 0, 0, ts.Tfs, 0, ts.Trise];
+          const wm = mul(textM, glyphTm);
+          const final = mul(wm, ts.ctm);
+          textTransform = `matrix(${fmt(final[0])},${fmt(final[1])},${fmt(-final[2])},${fmt(-final[3])},${fmt(final[4])},${fmt(final[5])})`;
+        }
+        textBuf += u;
+      }
+      glyphTm = mul([1, 0, 0, 1, advanceX, 0] as Mat6, glyphTm);
+    }
+    flushTextRun();
+    cur.Tm = glyphTm;
   }
 
   function drawImageXObject(name: string): void {

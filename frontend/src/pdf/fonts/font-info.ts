@@ -19,6 +19,7 @@ import { PdfDocument } from '../parser/document';
 import { CORE_14, isCore14, CoreFontMetrics } from './core14';
 import { parseToUnicodeCMap } from './cmap';
 import { CidMapLookup, getCidLookup } from './cid-mappings';
+import { buildGlyphOutlineCache, GlyphOutlineCache } from './ttf-glyph';
 
 export interface FontInfo {
   resourceName: string;
@@ -33,6 +34,10 @@ export interface FontInfo {
   widthOf: (code: number) => number;
   /** 'horizontal' (default) | 'vertical' — CMap WMode 에서 결정. */
   writingMode: 'horizontal' | 'vertical';
+  /** 폰트 unitsPerEm — outline path 좌표 단위. 없으면 1000. */
+  unitsPerEm: number;
+  /** code → SVG path d (font unit). null 이면 outline 사용 불가 — OS 폰트 fallback 권장. */
+  glyphOutline: ((code: number) => string | null) | null;
   ascent: number;
   descent: number;
   dict: PdfDict;
@@ -116,9 +121,11 @@ export function buildFontInfo(
     }
   }
 
-  // Composite 폰트의 W array + CIDSystemInfo
+  // Composite 폰트의 W array + CIDSystemInfo + FontFile2 (TrueType outline)
   let cidLookup: CidMapLookup | null = null;
   let cidSystemInfo: { registry: string; ordering: string } | null = null;
+  let outlineCache: GlyphOutlineCache | null = null;
+  let unitsPerEm = 1000;
   if (isComposite) {
     const descendants = dictGet(fontDict, 'DescendantFonts');
     if (descendants && isArray(descendants)) {
@@ -157,6 +164,48 @@ export function buildFontInfo(
                   );
                 }
               }
+            }
+          }
+          // FontDescriptor → FontFile2 (TrueType outline)
+          const fd = dictGet(cidFont, 'FontDescriptor');
+          if (fd) {
+            const fdRes = doc.resolve(fd);
+            if (isDict(fdRes)) {
+              const ff2 = dictGet(fdRes, 'FontFile2');
+              if (ff2) {
+                const ff2Res = doc.resolve(ff2);
+                if (isStream(ff2Res)) {
+                  try {
+                    const ttfBytes = decodeStream(ff2Res);
+                    outlineCache = buildGlyphOutlineCache(ttfBytes);
+                    // unitsPerEm extraction (lightweight)
+                    unitsPerEm = extractUnitsPerEm(ttfBytes) ?? 1000;
+                  } catch {
+                    /* ignore — outline 사용 안 함 */
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  } else {
+    // 단순 폰트도 FontFile2 가 있을 수 있음 (TrueType simple)
+    const fd = dictGet(fontDict, 'FontDescriptor');
+    if (fd) {
+      const fdRes = doc.resolve(fd);
+      if (isDict(fdRes)) {
+        const ff2 = dictGet(fdRes, 'FontFile2');
+        if (ff2) {
+          const ff2Res = doc.resolve(ff2);
+          if (isStream(ff2Res)) {
+            try {
+              const ttfBytes = decodeStream(ff2Res);
+              outlineCache = buildGlyphOutlineCache(ttfBytes);
+              unitsPerEm = extractUnitsPerEm(ttfBytes) ?? 1000;
+            } catch {
+              /* ignore */
             }
           }
         }
@@ -250,6 +299,18 @@ export function buildFontInfo(
       return defaultWidth;
     },
     writingMode,
+    unitsPerEm,
+    glyphOutline: outlineCache
+      ? (code: number) => {
+          // Type0 + Identity-H/V 의 경우 code === GID. 그 외는 code → GID 변환 필요.
+          // Composite font: code 는 CID 이고 CIDToGIDMap = Identity 가 일반 → GID = CID.
+          // Simple TTF: code → glyph index 는 cmap 또는 differences 로. 여기선 단순화 — 우리가 이미
+          //   만든 TTF parser 의 unicodeToGid 가 별도. 단순 폰트 outline 은 향후 보강 — 지금은
+          //   composite Type0 만 outline 사용 추천.
+          const path = outlineCache!.outline(code);
+          return path === '' ? null : path;
+        }
+      : null,
     ascent: coreMetrics?.ascent ?? 700,
     descent: coreMetrics?.descent ?? -200,
     dict: fontDict,
@@ -266,6 +327,25 @@ export function buildFontInfo(
 function stripSubsetPrefix(name: string): string {
   if (name.length >= 7 && name[6] === '+') return name.slice(7);
   return name;
+}
+
+function extractUnitsPerEm(ttf: Uint8Array): number | null {
+  try {
+    const dv = new DataView(ttf.buffer, ttf.byteOffset, ttf.byteLength);
+    if (ttf.byteLength < 12) return null;
+    const numTables = dv.getUint16(4);
+    for (let i = 0; i < numTables; i += 1) {
+      const base = 12 + i * 16;
+      const tag = dv.getUint32(base);
+      if (tag === 0x68656164 /* 'head' */) {
+        const offset = dv.getUint32(base + 8);
+        return dv.getUint16(offset + 18);
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 function parseEncodingHint(fontDict: PdfDict): string | undefined {
