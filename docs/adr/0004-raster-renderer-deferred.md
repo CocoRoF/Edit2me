@@ -1,10 +1,27 @@
 # ADR 0004 — 자체 raster renderer 보류 (v0.4+ 사이클)
 
-- **Status**: Accepted
-- **Date**: 2026-05-10
+- **Status**: Amended (v0.4 — SVG 방향 채택). Raster (canvas) 자체는 *여전히 보류*.
+- **Date**: 2026-05-10 (원안), 2026-05-10 (v0.4 amend)
 - **Deciders**: 프로젝트 오너
 
-## Context
+## v0.4 amend
+
+사용자가 "PDF의 모든 SVG 라인을 전부 렌더링" 을 명시 요구. 본 ADR 의 trigger 조건 #1 ("도형/이미지가 안 보여서 어디를 편집하는지 모르겠다") 이 즉시 충족됨. 그러나 **raster (canvas) 가 아니라 SVG (벡터)** 방향으로 진입. 이유:
+
+1. PDF 자체가 벡터 그래픽 모델 — SVG 와 자연 매핑 (path / transform / clip).
+2. 글리프 outline (TTF `glyf`) 을 SVG `<path d>` 로 직접 변환 가능 — 라스터화 알고리즘 불필요.
+3. 줌/스케일 손실 없음.
+4. 브라우저가 anti-aliasing 자동.
+5. raster 는 글리프 outline → 픽셀 그리기 (스캔라인) 가 별도 큰 모듈.
+
+PR #19–22 에서 SVG renderer 가 도입됨. 자세한 내역: [`docs/16-v0.4-changelog.md`](../16-v0.4-changelog.md).
+
+Raster (canvas / PNG / 비트맵) 는 여전히 미시작. 다음 트리거에 재논의:
+- 인쇄 정확도 (raster 가 더 결정적)
+- 무거운 이미지/투명 효과의 SVG 부담 (브라우저가 SVG 변환을 못 따라옴)
+- 오프라인 썸네일 (서버 PNG 직접 — 단, 우리 png-encoder 는 raw image 인코딩 용도로만 사용 중)
+
+## Context (원안)
 
 [`docs/05-renderer.md`](../05-renderer.md) Phase 2~3 는 *자체 raster renderer* 를 명시한다. 외부 PDF 라이브러리 금지(ADR-0001) 원칙 하에, 페이지를 픽셀로 그리려면:
 
