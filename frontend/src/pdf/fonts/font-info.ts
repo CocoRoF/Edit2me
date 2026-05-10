@@ -52,6 +52,8 @@ export interface FontInfo {
   encodeText:
     | ((text: string) => { bytes: Uint8Array; advance1000: number; missing: string[] } | null)
     | null;
+  /** 임베디드 TrueType 폰트의 raw bytes (FontFile2). 편집 박스에서 @font-face 로 사용. */
+  ttfBytes: Uint8Array | null;
   ascent: number;
   descent: number;
   dict: PdfDict;
@@ -145,6 +147,7 @@ export function buildFontInfo(
   // Composite 폰트 + Identity CIDToGIDMap 인 경우, Unicode → CID(=GID) 역매핑.
   // 편집(encodeText) 에 사용. parseTtf 는 비싸서 doc-level WeakMap 캐시.
   let parsedTtf: ParsedTtf | null = null;
+  let embeddedTtfBytes: Uint8Array | null = null;
   // 비-Identity CIDToGIDMap (cidToGid !== null) 이면 GID→CID reverse map 이 필요한데
   // 현재 미구현 → encodeText 에서 null 반환하도록 표식.
   let cidToGidIsIdentity = true;
@@ -199,6 +202,7 @@ export function buildFontInfo(
                 if (isStream(ff2Res)) {
                   try {
                     const ttfBytes = ttfBytesCached(doc, ff2Res);
+                    embeddedTtfBytes = ttfBytes;
                     outlineCache = buildGlyphOutlineCache(ttfBytes);
                     unitsPerEm = extractUnitsPerEm(ttfBytes) ?? 1000;
                     // unicodeToGid (편집 인코딩) — parseTtf 는 비싸므로 stream identity 로 캐시.
@@ -247,6 +251,7 @@ export function buildFontInfo(
           if (isStream(ff2Res)) {
             try {
               const ttfBytes = ttfBytesCached(doc, ff2Res);
+              embeddedTtfBytes = ttfBytes;
               outlineCache = buildGlyphOutlineCache(ttfBytes);
               unitsPerEm = extractUnitsPerEm(ttfBytes) ?? 1000;
             } catch {
@@ -406,6 +411,7 @@ export function buildFontInfo(
         }
       : null,
     encodeText,
+    ttfBytes: embeddedTtfBytes,
     ascent: coreMetrics?.ascent ?? 700,
     descent: coreMetrics?.descent ?? -200,
     dict: fontDict,

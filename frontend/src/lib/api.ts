@@ -146,6 +146,21 @@ export async function getPageTextBatch(
 
 // revision 쿼리 — 페이지 reorder/rotate/delete 후 같은 idx 의 thumb 이 바뀌므로,
 // 브라우저가 stale cache 를 쓰지 않도록 cache buster.
+export interface PageFont {
+  resourceName: string;
+  baseName: string;
+  isComposite: boolean;
+  dataUrl: string;
+  bytes: number;
+}
+
+export async function getPageFonts(docId: string, pageIndex: number): Promise<PageFont[]> {
+  const res = await fetch(apiUrl(`/api/documents/${docId}/pages/${pageIndex}/fonts`));
+  if (!res.ok) return [];
+  const data = (await res.json()) as { fonts: PageFont[] };
+  return data.fonts;
+}
+
 export function thumbUrl(docId: string, idx: number, w = 200, revision = 0): string {
   return apiUrl(`/api/documents/${docId}/pages/${idx}/thumb?w=${w}&r=${revision}`);
 }

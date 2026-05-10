@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { PageMeta, PageText, TextBlock } from '@/lib/api';
 import { svgUrl } from '@/lib/api';
 import { useIntersection } from '@/hooks/useIntersection';
+import { usePageFonts } from '@/hooks/usePageFonts';
 import { RotateCcw, RotateCw, Trash2, FilePlus } from 'lucide-react';
 
 interface Props {
@@ -58,6 +59,9 @@ export function PageView({
   const [ref, inView] = useIntersection<HTMLDivElement>('1000px');
   const [svgLoaded, setSvgLoaded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // PDF 내장 폰트들을 @font-face 로 등록 — 편집 박스가 PDF 와 동일한 폰트로 그려짐.
+  // page 가 inView 일 때만 fetch (큰 폰트 byte 절약).
+  const { fonts: pdfFonts } = usePageFonts(docId, page.index, revision, inView);
 
   const w = page.width * zoom;
   const h = page.height * zoom;
@@ -205,7 +209,12 @@ export function PageView({
           편집을 시작할 수 있게. canEdit 은 폰트가 인코딩 가능 (b.editable) 인지로만
           판정하고, 비active 페이지면 onBeginEdit 가 먼저 onActivate 호출 후 편집 시작. */}
       {pageText &&
-        pageText.blocks.map((b) => (
+        pageText.blocks.map((b) => {
+          // baseBaseName 으로 매칭되는 PDF 폰트 family. 없으면 system fallback.
+          const matchedFont = pdfFonts.find(
+            (pf) => pf.font.baseName === b.fontBaseName,
+          );
+          return (
           <TextBlockEditor
             key={b.blockId}
             block={b}
@@ -216,6 +225,7 @@ export function PageView({
             isSelected={selectedBlockId === b.blockId}
             canEdit={b.editable && !!onEditText}
             availableChars={pageText.availableChars}
+            pdfFontFamily={matchedFont?.family}
             onSelect={() => {
               if (!active) onActivate?.();
               setSelectedBlockId(b.blockId);
@@ -231,7 +241,8 @@ export function PageView({
             }}
             onCancel={() => setEditingId(null)}
           />
-        ))}
+          );
+        })}
       {/* SVG 로딩 전 회색 깜빡임 방지 */}
       {!svgLoaded && inView && (
         <div
@@ -255,6 +266,7 @@ function TextBlockEditor({
   isSelected,
   canEdit,
   availableChars,
+  pdfFontFamily,
   onSelect,
   onBeginEdit,
   onCommit,
@@ -268,6 +280,8 @@ function TextBlockEditor({
   isSelected: boolean;
   canEdit: boolean;
   availableChars: string;
+  /** PDF 임베디드 폰트 family 이름. 있으면 편집 박스가 그 폰트로 렌더. */
+  pdfFontFamily: string | undefined;
   onSelect: () => void;
   onBeginEdit: () => void;
   onCommit: (newText: string) => void;
@@ -333,9 +347,12 @@ function TextBlockEditor({
                 boxShadow: '0 4px 14px -4px var(--color-accent)',
                 zIndex: 20,
                 padding: '0 4px',
-                // 시스템 폰트 fallback — Korean 도 또렷이.
-                fontFamily:
-                  '"Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", -apple-system, sans-serif',
+                // PDF 의 임베디드 폰트가 있으면 그걸 우선. 없으면 시스템 폰트 fallback.
+                // PDF subset 폰트는 원문에 등장한 글자만 갖고 있어서 missing 글리프는
+                // fallback 폰트로 보임 → 사용자가 어떤 글자가 안 되는지 시각적으로 즉시 인지.
+                fontFamily: pdfFontFamily
+                  ? `"${pdfFontFamily}", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif`
+                  : '"Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif',
                 // antialiasing 강화
                 WebkitFontSmoothing: 'antialiased',
                 MozOsxFontSmoothing: 'grayscale',
