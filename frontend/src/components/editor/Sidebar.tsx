@@ -248,7 +248,6 @@ function SortableThumb({
     transform,
     transition,
     isOver,
-    isDragging,
   } = useSortable({ id });
 
   // 원본 자리: 드래그 중 빈 placeholder 처럼 흐리게.
@@ -256,29 +255,51 @@ function SortableThumb({
     ? { opacity: 0.25, transition }
     : { transform: CSS.Transform.toString(transform), transition };
 
+  // selected/active 강조: outline 두껍게 + accent halo (box-shadow). 다크 테마에서도
+  // accent-ring 은 alpha 라 잘 안 보이는 문제 → 직접 accent 색상 강하게.
+  let outlineCss = '1px solid var(--color-line)';
+  let shadowCss = 'none';
+  if (isActive) {
+    outlineCss = '3px solid var(--color-accent)';
+    shadowCss = '0 0 0 4px var(--color-accent-soft), 0 4px 14px -4px var(--color-accent)';
+  } else if (isSelected) {
+    outlineCss = '3px solid var(--color-accent)';
+    shadowCss = '0 0 0 3px var(--color-accent-soft)';
+  }
+
   return (
+    // 썸네일 전체가 drag 영역 — listeners/attributes 를 li 에 직접 적용.
+    // PointerSensor distance:8px 가 click 과 drag 를 자동 구분 (8px 이상 움직이면 drag,
+    // 아니면 pointerup 시 click 통과). hover 시 cursor:grab 으로 drag 가능함을 명시.
     <li
       ref={setNodeRef}
-      style={placeholderStyle}
-      className="relative cursor-pointer"
+      {...attributes}
+      {...listeners}
+      style={{
+        ...placeholderStyle,
+        cursor: isDraggingThis ? 'grabbing' : 'grab',
+        touchAction: 'none', // 모바일 scroll 과 drag 분리
+      }}
+      className="relative"
       onClick={onClick}
+      aria-label={`페이지 ${pageIndex + 1} — 클릭하여 선택, 드래그하여 순서 변경`}
     >
       {/* drop position indicator — drag over 시 위쪽에 accent line */}
       {isOver && !isDraggingThis && (
         <div
-          className="absolute left-0 right-0 -top-1.5 h-0.5 rounded-full pointer-events-none"
-          style={{ background: 'var(--color-accent)', boxShadow: '0 0 0 2px var(--color-accent-soft)' }}
+          className="absolute left-0 right-0 -top-1.5 h-1 rounded-full pointer-events-none"
+          style={{
+            background: 'var(--color-accent)',
+            boxShadow: '0 0 0 2px var(--color-accent-soft), 0 0 8px var(--color-accent)',
+          }}
         />
       )}
       <div
         className="relative rounded transition-shadow"
         style={{
-          outline: isActive
-            ? `2px solid var(--color-accent)`
-            : isSelected
-              ? `2px solid var(--color-accent-ring)`
-              : `1px solid var(--color-line)`,
+          outline: outlineCss,
           outlineOffset: '0',
+          boxShadow: shadowCss,
         }}
       >
         <img
@@ -287,42 +308,29 @@ function SortableThumb({
           className="w-full h-auto block rounded-sm"
           draggable={false}
         />
-        {/* drag handle — 좌상단 grip. 썸네일 자체 클릭은 select/activate, handle 만 drag */}
-        <button
-          {...attributes}
-          {...listeners}
-          aria-label={`드래그하여 페이지 ${pageIndex + 1} 순서 변경`}
-          onClick={(e) => e.stopPropagation()}
-          className="absolute top-1 left-1 w-6 h-6 rounded inline-flex items-center justify-center cursor-grab active:cursor-grabbing transition-opacity"
+        {/* 좌상단 grip indicator — drag affordance (visual hint). hover 시 더 진하게.
+            actual drag 는 li 전체에 걸려있어 이 아이콘이 안 보여도 drag 됨. */}
+        <span
+          aria-hidden
+          className="absolute top-1 left-1 w-6 h-6 rounded inline-flex items-center justify-center pointer-events-none transition-opacity"
           style={{
-            background: 'rgba(0,0,0,0.55)',
+            background: 'rgba(0,0,0,0.5)',
             color: '#fff',
-            opacity: isDragging ? 1 : 0,
-          }}
-          onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.opacity = '1')}
-          onMouseLeave={(e) => {
-            if (!isDragging) (e.currentTarget as HTMLButtonElement).style.opacity = '0';
+            opacity: isDraggingThis ? 1 : 0.55,
           }}
         >
           <GripVertical size={14} />
-        </button>
+        </span>
       </div>
       <div
         className="mt-1 text-[11px] text-center"
         style={{
           color: isActive ? 'var(--color-accent)' : 'var(--color-muted)',
-          fontWeight: isActive ? 600 : 400,
+          fontWeight: isActive ? 700 : 400,
         }}
       >
         {pageIndex + 1}
       </div>
-      {/* drop indicator after last item: bottom line */}
-      {isOver && !isDraggingThis && (
-        <div
-          className="absolute left-0 right-0 -bottom-1.5 h-0.5 rounded-full pointer-events-none opacity-0"
-          aria-hidden
-        />
-      )}
       {void originalIndex}
     </li>
   );
